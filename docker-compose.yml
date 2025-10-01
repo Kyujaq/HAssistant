@@ -1,0 +1,63 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: hassistant-ollama
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0', '1']  # Both GTX 1080 Ti and GTX 1070
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - OLLAMA_HOST=0.0.0.0:11434
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama:/root/.ollama  # Persistent model storage
+      - /home/qjaq/assistant/models:/models:ro  # Read-only access to existing models
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ha_network
+
+  # Wyoming Whisper STT (Speech-to-Text)
+  whisper:
+    image: rhasspy/wyoming-whisper:latest
+    container_name: hassistant-whisper
+    command: --model small --language en --uri 'tcp://0.0.0.0:10300' --data-dir /data
+    volumes:
+      - ./whisper_data:/data
+    ports:
+      - "10300:10300"
+    restart: unless-stopped
+    networks:
+      - ha_network
+
+  # Wyoming Piper TTS (Text-to-Speech) with GLaDOS voice
+  piper:
+    image: rhasspy/wyoming-piper:latest
+    container_name: hassistant-piper
+    command: --voice en_US-glados-high --uri 'tcp://0.0.0.0:10200' --data-dir /data --piper /usr/share/piper/piper
+    volumes:
+      - ./piper_data:/data
+      - /home/qjaq/assistant/models/tts:/custom-voices:ro
+    ports:
+      - "10200:10200"
+    restart: unless-stopped
+    networks:
+      - ha_network
+    environment:
+      - PIPER_VOICE=en_US-glados-high  # Will use if custom voice added
+
+networks:
+  ha_network:
+    external: true
+    name: assistant_default  # Connect to existing HA network

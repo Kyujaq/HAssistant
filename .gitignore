@@ -1,0 +1,23 @@
+# Environment files
+.env
+.env.local
+
+# Ollama data
+ollama/*
+!ollama/modelfiles/
+
+# Model files (large, keep in assistant dir)
+models/*
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Docker
+.dockerignore

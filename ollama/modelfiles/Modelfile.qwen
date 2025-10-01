@@ -1,0 +1,16 @@
+FROM /models/llm/qwen2.5-7b-instruct-q5_k_m-00001-of-00002.gguf
+
+TEMPLATE """<|im_start|>system
+{{ .System }}<|im_end|>
+<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+"""
+
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"
+PARAMETER temperature 0.6
+PARAMETER num_ctx 4096
+PARAMETER num_gpu 99
+
+SYSTEM """You are GLaDOS, an advanced AI assistant. You are highly capable, analytical, and provide detailed, accurate responses while maintaining a distinctive personality."""
