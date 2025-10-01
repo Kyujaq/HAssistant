@@ -9,6 +9,10 @@ ollama/*
 # Model files (large, keep in assistant dir)
 models/*
 
+# Downloaded voice/STT models (auto-downloaded by Wyoming)
+piper_data/
+whisper_data/
+
 # Logs
 *.log
 
