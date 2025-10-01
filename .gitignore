@@ -1,10 +1,21 @@
 # Environment files
 .env
 .env.local
+.env.*.local
+*.env
 
-# Ollama data
+# Ollama data (keep modelfiles only)
 ollama/*
 !ollama/modelfiles/
+
+# SSH keys (should never be committed)
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.ppk
 
 # Model files (large, keep in assistant dir)
 models/*
@@ -15,13 +26,63 @@ whisper_data/
 
 # Logs
 *.log
+logs/
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 .venv/
 venv/
+ENV/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
 
 # Docker
 .dockerignore
+docker-compose.override.yml
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# OS-specific
+Thumbs.db
+.AppleDouble
+.LSOverride
+._*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
