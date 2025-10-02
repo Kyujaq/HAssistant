@@ -71,6 +71,53 @@ services:
     networks:
       - ha_network
 
+  # PostgreSQL with pgvector for Letta memory
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: hassistant-postgres
+    environment:
+      - POSTGRES_DB=hassistant
+      - POSTGRES_USER=hassistant
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-hassistant_secure_password}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5433:5432"  # Use 5433 to avoid conflict with /assistant postgres
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hassistant -d hassistant"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ha_network
+
+  # Redis for session cache and ephemeral data
+  redis:
+    image: redis:7-alpine
+    container_name: hassistant-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-hassistant_redis_password}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6380:6379"  # Use 6380 to avoid conflict with /assistant redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ha_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
 networks:
   ha_network:
     external: true
