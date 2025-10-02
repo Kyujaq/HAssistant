@@ -57,6 +57,20 @@ services:
     environment:
       - PIPER_VOICE=en_US-glados-high  # Will use if custom voice added
 
+  # Home Assistant
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: hassistant-homeassistant
+    volumes:
+      - ./ha_config:/config
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "8123:8123"
+    restart: unless-stopped
+    privileged: true
+    networks:
+      - ha_network
+
 networks:
   ha_network:
     external: true

@@ -86,3 +86,14 @@ temp/
 *.tmp
 *.bak
 *.backup
+
+# Home Assistant runtime files
+ha_config/*.db
+ha_config/*.db-shm
+ha_config/*.db-wal
+ha_config/*.log
+ha_config/*.log.*
+ha_config/.storage/
+ha_config/.cloud/
+ha_config/deps/
+ha_config/tts/
