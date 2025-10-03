@@ -41,21 +41,18 @@ services:
     networks:
       - ha_network
 
-  # Wyoming Piper TTS (Text-to-Speech) with GLaDOS voice
-  piper:
+  # Wyoming Piper TTS (Text-to-Speech) - GLaDOS voice
+  piper-glados:
     image: rhasspy/wyoming-piper:latest
-    container_name: hassistant-piper
-    command: --voice en_US-glados-high --uri 'tcp://0.0.0.0:10200' --data-dir /data --piper /usr/share/piper/piper
+    container_name: hassistant-piper-glados
+    command: --voice en_US-glados-medium --uri 'tcp://0.0.0.0:10200' --data-dir /data --piper /usr/share/piper/piper
     volumes:
       - ./piper_data:/data
-      - /home/qjaq/assistant/models/tts:/custom-voices:ro
     ports:
       - "10200:10200"
     restart: unless-stopped
     networks:
       - ha_network
-    environment:
-      - PIPER_VOICE=en_US-glados-high  # Will use if custom voice added
 
   # Home Assistant
   homeassistant:
@@ -147,6 +144,65 @@ services:
     # Optional: mount your data/tools/configs
     volumes:
       - ./agent_data:/data
+
+  # ---- Vision Gateway (CPU heavy, light GPU use unless you enable GPU OCR) ----
+  vision-gateway:
+    build:
+      context: ./vision-gateway
+      dockerfile: Dockerfile
+    container_name: vision-gateway
+    environment:
+      # HA push
+      - HA_BASE_URL=http://192.168.2.13:8123
+      - HA_TOKEN=${HA_TOKEN}
+      # VL endpoint (1070 / Ollama-vision)
+      - OLLAMA_VISION_BASE=http://192.168.2.13:11434
+      - OLLAMA_VISION_MODEL=qwen2.5vl:7b
+      # Optional: enable internal HDMI pull
+      - HDMI_DEVICE=/dev/video0
+      - HDMI_ENABLED=true
+      - HDMI_FPS=2
+      - HDMI_RESIZE_LONG=1280
+      # Motion & debounce
+      - MOTION_THRESHOLD=0.015
+      - COOLDOWN_SECONDS=8
+    volumes:
+      - ./vision-gateway/cache:/app/cache
+    devices:
+      - "/dev/video0:/dev/video0"    # your HDMI dongle
+    depends_on:
+      - homeassistant
+    restart: unless-stopped
+    networks: [default]
+
+  # ---- Frigate (webcam motion, snapshots) ----
+  frigate:
+    image: ghcr.io/blakeblackshear/frigate:stable
+    container_name: frigate
+    privileged: true
+    shm_size: "512m"
+    environment:
+      - FRIGATE_RTSP_PASSWORD=${FRIGATE_RTSP_PASSWORD:-password}
+    volumes:
+      - ./frigate/config:/config
+      - /etc/localtime:/etc/localtime:ro
+      - ./frigate/media:/media/frigate
+    ports:
+      - "5000:5000"     # Frigate UI/API
+    restart: unless-stopped
+    networks: [default]
+
+  # Optional helper to snapshot webcam via Frigate API (no GPU)
+  frigate-snapshotper:
+    image: curlimages/curl:8.10.1
+    container_name: frigate-snapshotper
+    command: "sleep infinity"
+    networks: [default]
+
+  # Your ollama containers should already exist:
+  # - ollama-chat on GPU0 (11434) with Qwen3-* for chat
+  # - ollama-vision on GPU1 (11435->11434 in container) with qwen2.5vl:7b
+  # Ensure they're reachable as ollama-chat / ollama-vision or use host IPs.
 
 volumes:
   postgres_data:

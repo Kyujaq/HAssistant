@@ -1,0 +1,25 @@
+mqtt:
+  enabled: false   # simplest path (use HA automations via REST)
+
+detectors:
+  cpu1:
+    type: cpu
+
+cameras:
+  webcam1:
+    ffmpeg:
+      inputs:
+        - path: rtsp://USER:PASS@your_cam_ip:554/stream1
+          roles: [detect]
+    detect:
+      width: 1280
+      height: 720
+      enabled: true
+    motion:
+      threshold: 15
+      contour_area: 1000
+snapshots:
+  enabled: true
+  timestamp: false
+  retain:
+    default: 2
