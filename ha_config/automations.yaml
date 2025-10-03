@@ -1,1 +1,39 @@
+# Example automation demonstrating Letta Bridge memory integration
+# This automation shows how to push events to the memory system
+#
+# To use this automation:
+# 1. Uncomment the automation below
+# 2. Replace sensor.example_sensor with your actual sensor entity
+# 3. Customize the title, content, and tags to match your use case
+
+# - id: example_memory_automation
+#   alias: Example - Save Sensor Event to Memory
+#   trigger:
+#     - platform: state
+#       entity_id: sensor.example_sensor
+#       to: "some_state"
+#   action:
+#     - service: rest_command.letta_add_memory
+#       data:
+#         title: "Sensor state changed"
+#         content: "{{ trigger.entity_id }} changed to {{ trigger.to_state.state }}"
+#         tags: '["automation", "sensor", "example"]'
+#         source: '["ha://{{ trigger.entity_id }}"]'
+#         confidence: 0.85
+#         tier: "short"
+#         pin: false
+#         generate_embedding: true
+
+# Example automation: Morning briefing notification
+# - id: morning_brief_notification
+#   alias: Morning Brief - Daily Summary
+#   trigger:
+#     - platform: time
+#       at: "08:00:00"
+#   action:
+#     - service: notify.notify
+#       data:
+#         title: "Daily Memory Brief"
+#         message: "{{ state_attr('sensor.letta_daily_brief', 'items') | length }} memories from the past 24 hours"
+
 []
