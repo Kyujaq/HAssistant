@@ -10,9 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 
-# Force a wheel for PyMuPDF so it never builds from source
 RUN pip install --upgrade pip \
- && pip install --only-binary=:all: pymupdf==1.24.10 \
  && pip install -r /app/requirements.txt
 
 COPY app /app/app

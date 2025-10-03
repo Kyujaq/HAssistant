@@ -153,10 +153,10 @@ services:
     container_name: vision-gateway
     environment:
       # HA push
-      - HA_BASE_URL=http://192.168.2.13:8123
+      - HA_BASE_URL=http://homeassistant:8123
       - HA_TOKEN=${HA_TOKEN}
       # VL endpoint (1070 / Ollama-vision)
-      - OLLAMA_VISION_BASE=http://192.168.2.13:11434
+      - OLLAMA_VISION_BASE=http://ollama-vision:11434
       - OLLAMA_VISION_MODEL=qwen2.5vl:7b
       # Optional: enable internal HDMI pull
       - HDMI_DEVICE=/dev/video0
@@ -173,7 +173,8 @@ services:
     depends_on:
       - homeassistant
     restart: unless-stopped
-    networks: [default]
+    networks:
+      - ha_network
 
   # ---- Frigate (webcam motion, snapshots) ----
   frigate:
@@ -190,19 +191,66 @@ services:
     ports:
       - "5000:5000"     # Frigate UI/API
     restart: unless-stopped
-    networks: [default]
+    networks:
+      - ha_network
 
   # Optional helper to snapshot webcam via Frigate API (no GPU)
   frigate-snapshotper:
     image: curlimages/curl:8.10.1
     container_name: frigate-snapshotper
     command: "sleep infinity"
-    networks: [default]
+    networks:
+      - ha_network
 
   # Your ollama containers should already exist:
   # - ollama-chat on GPU0 (11434) with Qwen3-* for chat
   # - ollama-vision on GPU1 (11435->11434 in container) with qwen2.5vl:7b
   # Ensure they're reachable as ollama-chat / ollama-vision or use host IPs.
+  
+  ollama-chat:
+    image: ollama/ollama:latest
+    container_name: ollama-chat
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+              device_ids: ['0']   # GPU 0 → 1080 Ti
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    volumes:
+      - ./models:/models/Qwen3-8B:ro
+      - ./modelfiles:/models/Qwen3-8B:ro
+    restart: unless-stopped
+    networks:
+      - ha_network
+
+  ollama-vision:
+    image: ollama/ollama:latest
+    container_name: ollama-vision
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+              device_ids: ['1']   # GPU 1 → 1070
+    ports:
+      - "11435:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    volumes:
+      - ./models:/models:ro
+      - ./modelfiles:/models:ro
+    restart: unless-stopped
+    networks:
+      - ha_network
+  
+  
+  
 
 volumes:
   postgres_data:
