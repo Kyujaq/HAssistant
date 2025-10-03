@@ -28,6 +28,15 @@ whisper_data/
 *.log
 logs/
 
+# PyTorch source (if cloned)
+pytorch/
+
+# Qwen-Agent source (cloned during build)
+Qwen-Agent/
+
+# Agent data directory
+agent_data/
+
 # Python
 __pycache__/
 *.py[cod]

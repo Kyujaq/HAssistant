@@ -10,3 +10,42 @@ automation: !include automations.yaml
 script: !include scripts.yaml
 scene: !include scenes.yaml
 
+# Letta Bridge REST Commands
+rest_command:
+  letta_add_memory:
+    url: "http://hassistant-letta-bridge:8081/memory/add"
+    method: POST
+    headers:
+      x-api-key: "d6DkfuU7zPOpcoeAVabiNNPhTH6TcFrZ"
+      content-type: "application/json"
+    payload: >
+      {
+        "type": "{{ type|default('event') }}",
+        "title": "{{ title }}",
+        "content": "{{ content }}",
+        "tags": {{ tags|default([]) | tojson }},
+        "source": {{ source|default([]) | tojson }},
+        "confidence": {{ confidence|default(0.7) }},
+        "tier": "{{ tier|default('short') }}",
+        "pin": {{ pin|default(false) | tojson }},
+        "generate_embedding": {{ generate_embedding|default(true) | tojson }}
+      }
+
+# Letta Bridge Sensors
+sensor:
+  - platform: rest
+    name: letta_daily_brief
+    resource: "http://hassistant-letta-bridge:8081/daily_brief"
+    method: GET
+    headers:
+      x-api-key: "d6DkfuU7zPOpcoeAVabiNNPhTH6TcFrZ"
+    scan_interval: 900
+    value_template: "{{ value_json.items | length }}"
+    json_attributes:
+      - since
+      - items
+
+openai_conversation:
+  api_key: "sk-local"
+  api_base: "http://192.168.2.13:11434/v1"
+  model: "qwen3-8b"

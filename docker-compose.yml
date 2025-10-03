@@ -112,6 +112,42 @@ services:
     networks:
       - ha_network
 
+  # Letta Bridge API
+  letta-bridge:
+    build: ./letta_bridge
+    container_name: hassistant-letta-bridge
+    env_file: .env
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    depends_on:
+      - postgres
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-H", "x-api-key: ${BRIDGE_API_KEY:-change-me-to-secure-key}", "http://localhost:8081/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ha_network
+
+  # Qwen-Agent for AI orchestration
+  qwen-agent:
+    build:
+      context: ./qwen-agent
+      dockerfile: Dockerfile
+    container_name: hassistant-qwen-agent
+    env_file: .env
+    depends_on:
+      - letta-bridge
+    restart: unless-stopped
+    networks:
+      - ha_network
+    # Optional: mount your data/tools/configs
+    volumes:
+      - ./agent_data:/data
+
 volumes:
   postgres_data:
     driver: local

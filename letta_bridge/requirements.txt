@@ -1,0 +1,5 @@
+fastapi==0.114.2
+uvicorn[standard]==0.30.6
+asyncpg==0.29.0
+redis==5.0.7
+numpy==2.1.1
