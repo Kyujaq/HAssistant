@@ -30,7 +30,7 @@ rest_command:
         "pin": {{ pin|default(false) | tojson }},
         "generate_embedding": {{ generate_embedding|default(true) | tojson }}
       }
-  
+
   letta_memory_maintenance:
     url: "http://hassistant-letta-bridge:8081/memory/maintenance"
     method: POST
@@ -47,12 +47,10 @@ sensor:
     headers:
       x-api-key: "d6DkfuU7zPOpcoeAVabiNNPhTH6TcFrZ"
     scan_interval: 900
-    value_template: "{{ value_json.items | length }}"
+    value_template: "{{ value_json.items | length if value_json.items is defined else 0 }}"
     json_attributes:
       - since
       - items
 
-openai_conversation:
-  api_key: "sk-local"
-  api_base: "http://hassistant-glados-orchestrator:8082/v1"
-  model: "glados"
+# Note: OpenAI Conversation must be configured via UI in Settings > Integrations
+# Configure it to use: http://hassistant-glados-orchestrator:8082/v1 with model "glados"
