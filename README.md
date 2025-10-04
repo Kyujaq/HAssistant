@@ -8,6 +8,7 @@ A complete voice assistant implementation using Home Assistant's native features
 - **Voice Interaction**: Wyoming Whisper (STT) + Piper (TTS) with GLaDOS voice
 - **Raspberry Pi Client**: Wake word detection and voice processing
 - **Home Assistant Integration**: Native Assist API integration
+- **Memory System**: Letta Bridge with PostgreSQL + pgvector for contextual memory
 - **Dual GPU Support**: Automatic GPU allocation for optimal performance
 - **Multiple Models**: Switch between fast (Hermes-3 3B) and detailed (Qwen 2.5 7B) responses
 
@@ -23,12 +24,12 @@ A complete voice assistant implementation using Home Assistant's native features
 │ Home Assistant  │  Central hub + Assist API
 └────────┬────────┘
          │
-    ┌────┴────┐
-    │         │
-┌───▼───┐ ┌──▼──────┐
-│Ollama │ │ Wyoming │  LLM + STT/TTS services
-│  LLM  │ │ Services│
-└───────┘ └─────────┘
+    ┌────┴────┬─────────┐
+    │         │         │
+┌───▼───┐ ┌──▼──────┐ ┌▼──────────┐
+│Ollama │ │ Wyoming │ │Letta Bridge│  LLM + STT/TTS + Memory
+│  LLM  │ │ Services│ │ + pgvector │
+└───────┘ └─────────┘ └────────────┘
 ```
 
 ## Prerequisites
@@ -156,6 +157,7 @@ python3 pi_client.py
 - [HA Assist Setup](HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
 - [HA Voice Config](HA_VOICE_CONFIG.md) - Voice pipeline setup
 - [Wyoming Setup](WYOMING_SETUP.md) - STT/TTS service configuration
+- [Memory Integration](MEMORY_INTEGRATION.md) - Memory system usage and API guide
 - [Pi Setup](PI_SETUP.md) - Raspberry Pi client setup
 - [Pi Ethernet Setup](PI_ETHERNET_SETUP.md) - Network configuration for Pi
 

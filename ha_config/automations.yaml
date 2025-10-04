@@ -1,3 +1,38 @@
+# Active automations for Letta Memory Integration
+
+# Daily memory maintenance - runs cleanup at 3 AM
+- id: letta_memory_maintenance
+  alias: Letta - Daily Memory Maintenance
+  description: Clean up old memories based on tier retention policies
+  trigger:
+    - platform: time
+      at: "03:00:00"
+  action:
+    - service: rest_command.letta_memory_maintenance
+      data: {}
+
+# Log important state changes to memory
+- id: letta_log_important_events
+  alias: Letta - Log Important State Changes
+  description: Save significant home events to long-term memory
+  trigger:
+    - platform: state
+      entity_id:
+        - person.home_owner  # Adjust to your person entity
+      to: 
+        - home
+        - away
+  action:
+    - service: rest_command.letta_add_memory
+      data:
+        title: "Presence Change: {{ trigger.to_state.attributes.friendly_name }}"
+        content: "{{ trigger.to_state.attributes.friendly_name }} changed from {{ trigger.from_state.state }} to {{ trigger.to_state.state }} at {{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+        tags: '["presence", "automation", "home_state"]'
+        source: '["ha://{{ trigger.entity_id }}"]'
+        confidence: 0.95
+        tier: "medium"
+        type: "event"
+
 # Example automation demonstrating Letta Bridge memory integration
 # This automation shows how to push events to the memory system
 #
