@@ -1,38 +1,48 @@
 services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: hassistant-ollama
+  # Disabled old ollama service - using ollama-chat and ollama-vision instead
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: hassistant-ollama
+  #   runtime: nvidia
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             device_ids: ['0', '1']  # Both GTX 1080 Ti and GTX 1070
+  #             capabilities: [gpu]
+  #   environment:
+  #     - NVIDIA_VISIBLE_DEVICES=all
+  #     - OLLAMA_HOST=0.0.0.0:11434
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ./ollama:/root/.ollama  # Persistent model storage
+  #     - /home/qjaq/assistant/models:/models:ro  # Read-only access to existing models
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 10s
+  #   networks:
+  #     - ha_network
+
+  # Wyoming Whisper STT (Speech-to-Text) - GPU Accelerated
+  whisper:
+    image: rhasspy/wyoming-whisper:latest
+    container_name: hassistant-whisper
     runtime: nvidia
+    command: --model small --language en --uri 'tcp://0.0.0.0:10300' --data-dir /data --device cuda
     deploy:
       resources:
         reservations:
           devices:
-            - driver: nvidia
-              device_ids: ['0', '1']  # Both GTX 1080 Ti and GTX 1070
-              capabilities: [gpu]
+            - capabilities: [gpu]
+              device_ids: ['1']  # GPU 1 → GTX 1070 (lighter model, good for STT)
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - OLLAMA_HOST=0.0.0.0:11434
-    ports:
-      - "11434:11434"
-    volumes:
-      - ./ollama:/root/.ollama  # Persistent model storage
-      - /home/qjaq/assistant/models:/models:ro  # Read-only access to existing models
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    networks:
-      - ha_network
-
-  # Wyoming Whisper STT (Speech-to-Text)
-  whisper:
-    image: rhasspy/wyoming-whisper:latest
-    container_name: hassistant-whisper
-    command: --model small --language en --uri 'tcp://0.0.0.0:10300' --data-dir /data
+      - NVIDIA_VISIBLE_DEVICES=1
     volumes:
       - ./whisper_data:/data
     ports:
@@ -41,11 +51,20 @@ services:
     networks:
       - ha_network
 
-  # Wyoming Piper TTS (Text-to-Speech) - GLaDOS voice
+  # Wyoming Piper TTS (Text-to-Speech) - GLaDOS voice - GPU Accelerated
   piper-glados:
     image: rhasspy/wyoming-piper:latest
     container_name: hassistant-piper-glados
+    runtime: nvidia
     command: --voice en_US-glados-medium --uri 'tcp://0.0.0.0:10200' --data-dir /data --piper /usr/share/piper/piper
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+              device_ids: ['1']  # GPU 1 → GTX 1070 (share with Whisper)
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=1
     volumes:
       - ./piper_data:/data
     ports:

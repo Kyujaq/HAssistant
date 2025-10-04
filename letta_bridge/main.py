@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Literal
 import uuid
+import json
 
 import asyncpg
 import redis.asyncio as aioredis
@@ -131,22 +132,24 @@ async def add_memory(
                 INSERT INTO memory_blocks
                   (id, type, title, content, tags, source, confidence, created_at, last_used_at, tier, pin, meta)
                 VALUES
-                  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
                 RETURNING id
                 """,
                 uuid.uuid4(), body.type, body.title, body.content, body.tags, body.source,
-                body.confidence, now, now, db_tier, body.pin, body.meta
+                body.confidence, now, now, db_tier, body.pin, json.dumps(body.meta)
             )
 
             if body.generate_embedding:
                 emb = fake_embed(body.title + "\n" + body.content, EMBED_DIM)
+                # Convert list to pgvector format string
+                emb_str = '[' + ','.join(map(str, emb)) + ']'
                 await conn.execute(
                     """
                     INSERT INTO memory_embeddings (memory_id, embedding)
-                    VALUES ($1, $2)
+                    VALUES ($1, $2::vector)
                     ON CONFLICT (memory_id) DO UPDATE SET embedding = EXCLUDED.embedding
                     """,
-                    mem_id, emb
+                    mem_id, emb_str
                 )
 
     # small ephemeral marker in Redis (optional)
@@ -195,8 +198,10 @@ async def memory_search(
     async with pg.acquire() as conn:
         # vector part
         emb = fake_embed(q, EMBED_DIM)
+        # Convert list to pgvector format string
+        emb_str = '[' + ','.join(map(str, emb)) + ']'
         filters = []
-        params = [emb]
+        params = [emb_str]
         if tiers_list:
             filters.append(f"tier = ANY(${len(params)+1})")
             params.append(tiers_list)
