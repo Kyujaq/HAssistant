@@ -47,5 +47,5 @@ sensor:
 
 openai_conversation:
   api_key: "sk-local"
-  api_base: "http://192.168.2.13:11434/v1"
-  model: "qwen3-8b"
+  api_base: "http://hassistant-glados-orchestrator:8082/v1"
+  model: "glados"

@@ -145,6 +145,31 @@ services:
     volumes:
       - ./agent_data:/data
 
+  # GLaDOS Orchestrator - Routes queries between Qwen (brain) and Hermes (personality)
+  glados-orchestrator:
+    build:
+      context: ./glados-orchestrator
+      dockerfile: Dockerfile
+    container_name: hassistant-glados-orchestrator
+    environment:
+      - OLLAMA_BASE_URL=http://ollama-chat:11434
+      - QWEN_MODEL=qwen2.5:7b
+      - HERMES_MODEL=glados-hermes3
+      - PORT=8082
+    ports:
+      - "8082:8082"
+    depends_on:
+      - ollama-chat
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ha_network
+
   # ---- Vision Gateway (CPU heavy, light GPU use unless you enable GPU OCR) ----
   vision-gateway:
     build:
@@ -221,10 +246,18 @@ services:
       - "11434:11434"
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
+      - NVIDIA_VISIBLE_DEVICES=0
     volumes:
-      - ./models:/models/Qwen3-8B:ro
-      - ./modelfiles:/models/Qwen3-8B:ro
+      - ollama_chat_data:/root/.ollama
+      - ./ollama/modelfiles:/root/.ollama/modelfiles:ro
+      - /home/qjaq/assistant/models:/models:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     networks:
       - ha_network
 
@@ -242,10 +275,18 @@ services:
       - "11435:11434"
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
+      - NVIDIA_VISIBLE_DEVICES=1
     volumes:
-      - ./models:/models:ro
-      - ./modelfiles:/models:ro
+      - ollama_vision_data:/root/.ollama
+      - ./ollama/modelfiles:/root/.ollama/modelfiles:ro
+      - /home/qjaq/assistant/models:/models:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     networks:
       - ha_network
   
@@ -256,6 +297,10 @@ volumes:
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  ollama_chat_data:
+    driver: local
+  ollama_vision_data:
     driver: local
 
 networks:
