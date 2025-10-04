@@ -20,6 +20,7 @@ HDMI_RESIZE_LONG = int(os.getenv("HDMI_RESIZE_LONG", "1280"))
 
 MOTION_THRESHOLD = float(os.getenv("MOTION_THRESHOLD", "0.015"))  # fraction of pixels changed
 COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "8"))
+OCR_MODE = os.getenv("OCR_MODE", "anchor_based")  # anchor_based or full_screen
 
 # Keywords we care about
 SEED_WORDS = [r"accept", r"decline", r"join(?:\s+now)?", r"send(?:\s+update)?", r"meeting", r"invite", r"calendar"]
@@ -27,7 +28,8 @@ TIME_PAT = re.compile(r"\b([01]?\d|2[0-3]):[0-5]\d(\s?[APap]\.?M\.?)?\b")
 DATE_PAT = re.compile(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)?\,?\s?(?:\d{1,2}\/\d{1,2}|\d{4}-\d{2}-\d{2}|\w+\s+\d{1,2})\b")
 
 # OCR engine (EN first; add 'lang' list if you want more)
-ocr = PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
+# Optimized for speed: disable angle classification, faster detection threshold
+ocr = PaddleOCR(use_angle_cls=False, lang='en', show_log=False, det_db_thresh=0.3)
 
 app = FastAPI(title="Vision Gateway")
 
@@ -279,6 +281,384 @@ def hdmi_loop():
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
+
+# ---- Debug endpoints and Frigate stream integration ----
+recent_detections = []  # Store last 10 detections
+
+def frigate_stream_loop_legacy():
+    """Legacy full-screen OCR mode (original implementation)"""
+    FRIGATE_API = "http://frigate:5000/api/ugreen_camera/latest.jpg"
+
+    while True:
+        try:
+            # Fetch latest frame from Frigate
+            resp = requests.get(FRIGATE_API, timeout=5)
+            if resp.status_code != 200:
+                print(f"[frigate_stream] Failed to fetch frame: {resp.status_code}", flush=True)
+                time.sleep(5)
+                continue
+
+            # Decode image
+            img_array = np.frombuffer(resp.content, np.uint8)
+            frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+            if frame is None:
+                time.sleep(5)
+                continue
+
+            # Process frame
+            result = process_frame("frigate_hdmi", frame)
+
+            # Store detection if interesting
+            if result.get("invite_detected") or result.get("vl", {}).get("invite_detected"):
+                recent_detections.insert(0, {
+                    "timestamp": time.time(),
+                    "result": result,
+                    "frame_b64": b64_jpg(cv2.resize(frame, (640, 360)))  # Small preview
+                })
+                recent_detections[:] = recent_detections[:10]  # Keep last 10
+
+            time.sleep(10)  # Process 0.1 FPS (every 10 seconds - reduce CPU load)
+
+        except Exception as e:
+            print(f"[frigate_stream] Error: {e}", flush=True)
+            time.sleep(5)
+
+def frigate_stream_loop():
+    """
+    Press-triggered detection loop (ultra CPU efficient)
+
+    Phase 1: Lightweight OCR to find buttons
+    Phase 2: Track button visually (no OCR, just pixel changes)
+    Phase 3: On button press (darkening) → snapshot + full context extraction
+    Phase 4: Vision model only when button is pressed
+    """
+    from . import anchor_detector
+    from . import context_extractor
+
+    # Share OCR instance with sub-modules to avoid creating multiple instances
+    anchor_detector.set_shared_ocr(ocr)
+    context_extractor.set_shared_ocr(ocr)
+
+    # Toggle between modes
+    if OCR_MODE == "full_screen":
+        print("[frigate_stream] Using legacy full-screen OCR mode", flush=True)
+        return frigate_stream_loop_legacy()
+
+    print("[frigate_stream] Using press-triggered detection mode", flush=True)
+    FRIGATE_API = "http://frigate:5000/api/ugreen_camera/latest.jpg"
+
+    button_tracker = None  # Track button visually
+    tracking_source = "frigate_hdmi"
+
+    while True:
+        try:
+            # Fetch latest frame from Frigate
+            resp = requests.get(FRIGATE_API, timeout=5)
+            if resp.status_code != 200:
+                print(f"[frigate_stream] Failed to fetch frame: {resp.status_code}", flush=True)
+                time.sleep(5)
+                continue
+
+            # Decode image
+            img_array = np.frombuffer(resp.content, np.uint8)
+            frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+            if frame is None:
+                time.sleep(5)
+                continue
+
+            # Downscale for faster processing
+            frame_ds = downscale_keep_long(frame, HDMI_RESIZE_LONG)
+
+            # If we're tracking a button, check for press
+            if button_tracker is not None:
+                track_result = button_tracker.update_and_check(frame_ds)
+
+                if not track_result.get("ok"):
+                    # Lost tracking, reset
+                    print("[frigate_stream] Lost button tracking, rescanning...", flush=True)
+                    button_tracker = None
+                    time.sleep(2)
+                    continue
+
+                if track_result.get("pressed"):
+                    # ===== BUTTON PRESSED! Capture snapshot and extract context =====
+                    print(f"[frigate_stream] 🔥 BUTTON PRESS DETECTED! Extracting context...", flush=True)
+
+                    # Now do the expensive operations
+                    ocr_boxes = ocr_with_boxes(frame_ds)
+                    buttons = anchor_detector.detect_buttons(frame_ds, ocr_boxes=ocr_boxes)
+
+                    if buttons:
+                        priority_order = ["accept", "join", "decline", "send"]
+                        buttons_sorted = sorted(buttons, key=lambda b: priority_order.index(b["keyword"]) if b["keyword"] in priority_order else 999)
+                        primary_button = buttons_sorted[0]
+
+                        # Extract context around pressed button
+                        context = context_extractor.extract_meeting_context(frame_ds, primary_button["bbox"])
+
+                        # Vision model
+                        crops = smart_crops(frame_ds, ocr_boxes)
+                        vl_result = call_qwen_vl(frame_ds, crops)
+
+                        # Push HA event
+                        ha_event("vision.meeting_action", {
+                            "source": tracking_source,
+                            "action": "button_press",
+                            "button": primary_button["keyword"],
+                            "context": {
+                                "title": context.get("title_text", ""),
+                                "start_time": context.get("time_start_text", ""),
+                                "end_time": context.get("time_end_text", ""),
+                                "location": context.get("location_text", ""),
+                            },
+                            "vl": vl_result,
+                            "metrics": {"ssim": track_result["ssim"], "dv": track_result["dv"]}
+                        })
+
+                        # Store detection
+                        result = {
+                            "invite_detected": True,
+                            "button_pressed": True,
+                            "vl": vl_result,
+                            "anchor_button": primary_button,
+                            "context": context,
+                            "detection_mode": "press_triggered"
+                        }
+
+                        recent_detections.insert(0, {
+                            "timestamp": time.time(),
+                            "result": result,
+                            "frame_b64": b64_jpg(cv2.resize(frame_ds, (640, 360))),
+                            "button_bbox": primary_button["bbox"],
+                            "context_zones": context.get("zones", {})
+                        })
+                        recent_detections[:] = recent_detections[:10]
+
+                        print(f"[frigate_stream] ✅ Press captured! title='{context.get('title_text', '')[:40]}' loc='{context.get('location_text', '')[:20]}'", flush=True)
+
+                    # Reset tracker after press
+                    button_tracker = None
+                    time.sleep(5)  # Cooldown after press
+                else:
+                    # Still tracking, no press yet
+                    time.sleep(2)  # Poll every 2s when tracking (reduce CPU)
+                continue
+
+            # ===== Phase 1: Lightweight scan for buttons (no tracking yet) =====
+            ocr_boxes = ocr_with_boxes(frame_ds)
+
+            if not ocr_boxes:
+                time.sleep(5)
+                continue
+
+            buttons = anchor_detector.detect_buttons(frame_ds, ocr_boxes=ocr_boxes)
+
+            if buttons:
+                # Found button! Start tracking it
+                priority_order = ["accept", "join", "decline", "send"]
+                buttons_sorted = sorted(buttons, key=lambda b: priority_order.index(b["keyword"]) if b["keyword"] in priority_order else 999)
+                primary_button = buttons_sorted[0]
+
+                print(f"[frigate_stream] 👁️  Found {primary_button['keyword']} button, starting visual tracking...", flush=True)
+
+                # Initialize tracker on this button
+                x, y, w, h = primary_button["bbox"]
+                button_tracker = ROITracker(frame_ds, (x, y, w, h))
+
+                time.sleep(1)  # Brief pause before starting tracking loop
+            else:
+                # No buttons, keep scanning
+                time.sleep(5)
+
+        except Exception as e:
+            print(f"[frigate_stream] Error: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            button_tracker = None
+            time.sleep(5)
+
+@app.get("/debug")
+async def debug_page():
+    """HTML debug UI with anchor detection visualization"""
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Vision Gateway Debug - Anchor Detection</title>
+        <meta http-equiv="refresh" content="5">
+        <style>
+            body { font-family: monospace; background: #1a1a1a; color: #0f0; padding: 20px; }
+            .header { border-bottom: 2px solid #0f0; margin-bottom: 20px; padding-bottom: 10px; }
+            .mode { color: #ff0; font-size: 1.2em; }
+            .detection { border: 1px solid #0f0; margin: 20px 0; padding: 15px; background: #0a0a0a; }
+            .timestamp { color: #0ff; font-size: 1.1em; margin-bottom: 10px; }
+            .image-container { position: relative; display: inline-block; }
+            img { max-width: 640px; border: 1px solid #0f0; }
+            canvas { position: absolute; top: 0; left: 0; max-width: 640px; pointer-events: none; }
+            .context-info { color: #ff0; margin: 10px 0; }
+            .context-text { background: #000; padding: 5px; margin: 5px 0; border-left: 3px solid #0ff; }
+            pre { background: #000; padding: 10px; overflow-x: auto; }
+            .button-info { color: #0f0; font-weight: bold; }
+            .legend { margin: 20px 0; padding: 10px; background: #000; border: 1px solid #0f0; }
+            .legend-item { margin: 5px 0; }
+            .legend-box { display: inline-block; width: 20px; height: 10px; margin-right: 10px; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>Vision Gateway - Anchor-Based Detection</h1>
+            <p class="mode">Mode: """ + OCR_MODE + """</p>
+            <p>Monitoring Frigate HDMI stream for meeting invites...</p>
+        </div>
+        <div class="legend">
+            <div class="legend-item"><span class="legend-box" style="background: #00ff00;"></span>Button Detection</div>
+            <div class="legend-item"><span class="legend-box" style="background: #ff0000;"></span>Title Zone</div>
+            <div class="legend-item"><span class="legend-box" style="background: #0000ff;"></span>Start Time Zone</div>
+            <div class="legend-item"><span class="legend-box" style="background: #ff00ff;"></span>End Time Zone</div>
+            <div class="legend-item"><span class="legend-box" style="background: #00ffff;"></span>Location Zone</div>
+            <div class="legend-item"><span class="legend-box" style="background: #ffff00;"></span>Attendees Zone</div>
+        </div>
+        <div id="detections"></div>
+        <script>
+            function drawBoundingBoxes(imgElement, buttonBbox, contextZones) {
+                const container = imgElement.parentElement;
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+
+                // Set canvas size to match image
+                canvas.width = imgElement.naturalWidth;
+                canvas.height = imgElement.naturalHeight;
+                canvas.style.width = imgElement.width + 'px';
+                canvas.style.height = imgElement.height + 'px';
+
+                // Draw button bbox (green)
+                if (buttonBbox && buttonBbox.length === 4) {
+                    const [x, y, w, h] = buttonBbox;
+                    ctx.strokeStyle = '#00ff00';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(x, y, w, h);
+                    ctx.fillStyle = '#00ff00';
+                    ctx.font = '16px monospace';
+                    ctx.fillText('BUTTON', x, y - 5);
+                }
+
+                // Draw context zones
+                if (contextZones) {
+                    // Title zone (red)
+                    if (contextZones.title && contextZones.title.length === 4) {
+                        const [x, y, w, h] = contextZones.title;
+                        ctx.strokeStyle = '#ff0000';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(x, y, w, h);
+                        ctx.fillStyle = '#ff0000';
+                        ctx.font = '14px monospace';
+                        ctx.fillText('TITLE', x, y - 5);
+                    }
+
+                    // Start time zone (blue)
+                    if (contextZones.time_start && contextZones.time_start.length === 4) {
+                        const [x, y, w, h] = contextZones.time_start;
+                        ctx.strokeStyle = '#0000ff';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(x, y, w, h);
+                        ctx.fillStyle = '#0000ff';
+                        ctx.font = '14px monospace';
+                        ctx.fillText('START', x, y - 5);
+                    }
+
+                    // End time zone (magenta)
+                    if (contextZones.time_end && contextZones.time_end.length === 4) {
+                        const [x, y, w, h] = contextZones.time_end;
+                        ctx.strokeStyle = '#ff00ff';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(x, y, w, h);
+                        ctx.fillStyle = '#ff00ff';
+                        ctx.font = '14px monospace';
+                        ctx.fillText('END', x, y - 5);
+                    }
+
+                    // Location zone (cyan)
+                    if (contextZones.location && contextZones.location.length === 4) {
+                        const [x, y, w, h] = contextZones.location;
+                        ctx.strokeStyle = '#00ffff';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(x, y, w, h);
+                        ctx.fillStyle = '#00ffff';
+                        ctx.font = '14px monospace';
+                        ctx.fillText('LOCATION', x, y - 5);
+                    }
+
+                    // Attendees zone (yellow)
+                    if (contextZones.attendees && contextZones.attendees.length === 4) {
+                        const [x, y, w, h] = contextZones.attendees;
+                        ctx.strokeStyle = '#ffff00';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(x, y, w, h);
+                        ctx.fillStyle = '#ffff00';
+                        ctx.font = '14px monospace';
+                        ctx.fillText('ATTENDEES', x, y - 5);
+                    }
+                }
+
+                container.appendChild(canvas);
+            }
+
+            fetch('/api/detections')
+                .then(r => r.json())
+                .then(data => {
+                    const div = document.getElementById('detections');
+                    if (data.length === 0) {
+                        div.innerHTML = '<p>No detections yet... Waiting for meeting invites...</p>';
+                        return;
+                    }
+                    div.innerHTML = data.map(d => {
+                        const buttonInfo = d.button_bbox ? `<p class="button-info">Button: ${JSON.stringify(d.result.anchor_button || {})}</p>` : '';
+                        const context = d.result.context || {};
+                        const contextInfo = context.title_text || context.time_start_text || context.time_end_text || context.location_text || context.attendees_text ? `
+                            <div class="context-info">
+                                <h3>Extracted Context:</h3>
+                                ${context.title_text ? '<div class="context-text"><strong>Title:</strong> ' + context.title_text + '</div>' : ''}
+                                ${context.time_start_text ? '<div class="context-text"><strong>Start Time:</strong> ' + context.time_start_text + '</div>' : ''}
+                                ${context.time_end_text ? '<div class="context-text"><strong>End Time:</strong> ' + context.time_end_text + '</div>' : ''}
+                                ${context.location_text ? '<div class="context-text"><strong>Location:</strong> ' + context.location_text + '</div>' : ''}
+                                ${context.attendees_text ? '<div class="context-text"><strong>Attendees:</strong> ' + context.attendees_text + '</div>' : ''}
+                            </div>
+                        ` : '';
+
+                        return `
+                            <div class="detection">
+                                <div class="timestamp">${new Date(d.timestamp * 1000).toLocaleString()}</div>
+                                ${buttonInfo}
+                                <div class="image-container">
+                                    <img src="data:image/jpeg;base64,${d.frame_b64}"
+                                         onload="drawBoundingBoxes(this, ${JSON.stringify(d.button_bbox)}, ${JSON.stringify(d.context_zones)})">
+                                </div>
+                                ${contextInfo}
+                                <details>
+                                    <summary>Full Detection Data</summary>
+                                    <pre>${JSON.stringify(d.result, null, 2)}</pre>
+                                </details>
+                            </div>
+                        `;
+                    }).join('');
+                });
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+@app.get("/api/detections")
+def get_recent_detections():
+    """API endpoint for recent detections"""
+    return recent_detections
+
+from fastapi.responses import HTMLResponse
+
+# Start Frigate stream processor
+threading.Thread(target=frigate_stream_loop, daemon=True).start()
 
 if HDMI_ENABLED:
     threading.Thread(target=hdmi_loop, daemon=True).start()

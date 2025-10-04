@@ -29,9 +29,9 @@ services:
   #   networks:
   #     - ha_network
 
-  # Wyoming Whisper STT (Speech-to-Text) - GPU Accelerated
+  # Wyoming Whisper STT (Speech-to-Text) - GPU Accelerated with CUDA/cuDNN support
   whisper:
-    image: rhasspy/wyoming-whisper:latest
+    image: slackr31337/wyoming-whisper-gpu:latest
     container_name: hassistant-whisper
     runtime: nvidia
     command: --model small --language en --uri 'tcp://0.0.0.0:10300' --data-dir /data --device cuda
@@ -135,14 +135,14 @@ services:
     env_file: .env
     restart: unless-stopped
     ports:
-      - "8081:8081"
+      - "8081:8000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "x-api-key: ${BRIDGE_API_KEY:-change-me-to-secure-key}", "http://localhost:8081/healthz"]
+      test: ["CMD", "curl", "-f", "-H", "x-api-key: ${BRIDGE_API_KEY:-change-me-to-secure-key}", "http://localhost:8000/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -174,13 +174,16 @@ services:
     container_name: hassistant-glados-orchestrator
     environment:
       - OLLAMA_BASE_URL=http://ollama-chat:11434
-      - QWEN_MODEL=qwen2.5:7b
+      - QWEN_MODEL=qwen3:4b-instruct-2507-q4_K_M
       - HERMES_MODEL=glados-hermes3
+      - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8000
+      - LETTA_API_KEY=${BRIDGE_API_KEY:-d6DkfuU7zPOpcoeAVabiNNPhTH6TcFrZ}
       - PORT=8082
     ports:
       - "8082:8082"
     depends_on:
       - ollama-chat
+      - letta-bridge
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/healthz"]
@@ -204,20 +207,22 @@ services:
       # VL endpoint (1070 / Ollama-vision)
       - OLLAMA_VISION_BASE=http://ollama-vision:11434
       - OLLAMA_VISION_MODEL=qwen2.5vl:7b
-      # Optional: enable internal HDMI pull
-      - HDMI_DEVICE=/dev/video0
-      - HDMI_ENABLED=true
-      - HDMI_FPS=2
-      - HDMI_RESIZE_LONG=1280
+      # Disabled direct HDMI capture - will consume from Frigate's high-quality stream instead
+      - HDMI_ENABLED=false
       # Motion & debounce
       - MOTION_THRESHOLD=0.015
       - COOLDOWN_SECONDS=8
+      # Anchor-based detection configuration
+      - OCR_MODE=anchor_based  # anchor_based or full_screen
+      - ANCHOR_KEYWORDS=Accept,Send,Join,Decline  # Action buttons only (removed Meeting,Invite to reduce false positives)
+      - CONTEXT_ZONES_ENABLED=true
     volumes:
       - ./vision-gateway/cache:/app/cache
-    devices:
-      - "/dev/video0:/dev/video0"    # your HDMI dongle
+    ports:
+      - "8088:8088"  # Debug UI at http://localhost:8088/debug
     depends_on:
       - homeassistant
+      - frigate
     restart: unless-stopped
     networks:
       - ha_network
@@ -226,14 +231,26 @@ services:
   frigate:
     image: ghcr.io/blakeblackshear/frigate:stable
     container_name: frigate
+    runtime: nvidia
     privileged: true
     shm_size: "512m"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu,video]
+              device_ids: ['1']   # GPU 1 → GTX 1070 (shared with vision tasks)
     environment:
       - FRIGATE_RTSP_PASSWORD=${FRIGATE_RTSP_PASSWORD:-password}
+      - NVIDIA_VISIBLE_DEVICES=1
     volumes:
       - ./frigate/config:/config
       - /etc/localtime:/etc/localtime:ro
       - ./frigate/media:/media/frigate
+    devices:
+      - /dev/video0:/dev/video0
+      - /dev/video2:/dev/video2
+
     ports:
       - "5000:5000"     # Frigate UI/API
     restart: unless-stopped
@@ -273,12 +290,6 @@ services:
       - ./ollama/modelfiles:/root/.ollama/modelfiles:ro
       - /home/qjaq/assistant/models:/models:ro
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
     networks:
       - ha_network
 
@@ -291,7 +302,7 @@ services:
         reservations:
           devices:
             - capabilities: [gpu]
-              device_ids: ['1']   # GPU 1 → 1070
+              device_ids: ['0']   # GPU 0 → GTX 1080 Ti (11GB - fits 8.6GB model)
     ports:
       - "11435:11434"
     environment:
@@ -302,12 +313,6 @@ services:
       - ./ollama/modelfiles:/root/.ollama/modelfiles:ro
       - /home/qjaq/assistant/models:/models:ro
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
     networks:
       - ha_network
   
