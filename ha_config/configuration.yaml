@@ -30,6 +30,13 @@ rest_command:
         "pin": {{ pin|default(false) | tojson }},
         "generate_embedding": {{ generate_embedding|default(true) | tojson }}
       }
+  
+  letta_memory_maintenance:
+    url: "http://hassistant-letta-bridge:8081/memory/maintenance"
+    method: POST
+    headers:
+      x-api-key: "d6DkfuU7zPOpcoeAVabiNNPhTH6TcFrZ"
+      content-type: "application/json"
 
 # Letta Bridge Sensors
 sensor:
