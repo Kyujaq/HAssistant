@@ -23,7 +23,7 @@ CREATE TABLE memory_blocks (
 -- Vector embeddings for semantic search
 CREATE TABLE memory_embeddings (
     memory_id UUID REFERENCES memory_blocks(id) ON DELETE CASCADE,
-    embedding VECTOR(1536),  -- OpenAI ada-002 dimension (adjust if using different model)
+    embedding VECTOR(384),  -- Matches all-MiniLM-L6-v2 dimension
     PRIMARY KEY (memory_id)
 );
 

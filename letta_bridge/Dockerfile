@@ -1,10 +1,27 @@
+# Use an official Python runtime as a parent image
 FROM python:3.11-slim
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables
+ENV PIP_NO_CACHE_DIR=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Set the working directory in the container
 WORKDIR /app
-COPY requirements.txt .
+
+# Copy the requirements file into the container at /app
+COPY ./requirements.txt /app/requirements.txt
+
+# Install any needed packages specified in requirements.txt
+# This will also cache the sentence-transformer model in the image
 RUN pip install --no-cache-dir -r requirements.txt
-COPY main.py .
-EXPOSE 8081
-ENV PORT=8081
-CMD ["python", "main.py"]
+
+# Copy the rest of the application's code into the container at /app
+COPY . /app
+
+# Make port 8000 available to the world outside this container
+EXPOSE 8000
+
+# Run main.py when the container launches
+# Use uvicorn to run the FastAPI application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
