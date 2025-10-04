@@ -102,7 +102,7 @@ services:
       - "6380:6379"  # Use 6380 to avoid conflict with /assistant redis
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-hassistant_redis_password}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -118,8 +118,10 @@ services:
     ports:
       - "8081:8081"
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "-H", "x-api-key: ${BRIDGE_API_KEY:-change-me-to-secure-key}", "http://localhost:8081/healthz"]
       interval: 30s

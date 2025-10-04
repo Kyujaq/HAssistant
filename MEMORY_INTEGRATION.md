@@ -1,249 +1,414 @@
-# Memory Integration Guide
+# Memory Integration - Letta-Style Architecture
 
-## Overview
+HAssistant implements a sophisticated memory system inspired by Letta (formerly MemGPT) for persistent, context-aware AI interactions. This document describes the architecture, usage, and maintenance of the memory integration.
 
-HAssistant includes a sophisticated memory system powered by the Letta Bridge API. This system allows the assistant to store, retrieve, and manage contextual information about your home, conversations, and events.
+## Architecture Overview
 
-## Architecture
+```
+┌─────────────────┐
+│  Qwen Agent /   │  Memory operations via REST API
+│  Home Assistant │
+└────────┬────────┘
+         │
+    ┌────▼─────┐
+    │  Letta   │  FastAPI Bridge (Port 8081)
+    │  Bridge  │  - Memory CRUD operations
+    │          │  - Semantic search
+    └────┬─────┘  - Daily briefing
+         │
+    ┌────┴────┐
+    │         │
+┌───▼───┐ ┌──▼────┐
+│ Redis │ │Postgres│  Cache + Persistent storage
+│ Cache │ │pgvector│  Vector embeddings
+└───────┘ └────────┘
+```
 
-The memory system consists of:
-- **PostgreSQL with pgvector**: Vector database for semantic search
-- **Redis**: Fast caching layer for recent operations
-- **Letta Bridge API**: RESTful API for memory operations
-- **Home Assistant Integration**: REST commands and sensors
+## Components
+
+### 1. Letta Bridge API (`letta_bridge/`)
+
+FastAPI service providing REST endpoints for memory operations:
+
+- **POST /memory/add** - Create new memory entries
+- **GET /memory/search** - Semantic search across memories
+- **POST /memory/pin** - Pin important memories
+- **POST /memory/forget** - Demote or remove memories
+- **GET /daily_brief** - Get recent insights and important memories
+- **GET /healthz** - Health check endpoint
+- **GET /metrics** - Service metrics (stub)
+
+### 2. PostgreSQL with pgvector
+
+Persistent storage with vector similarity search:
+
+- **memory_blocks** - Core memory storage with tiered retention
+- **memory_embeddings** - Vector embeddings for semantic search (1536-dim)
+- **agent_state** - Letta agent state persistence
+- **conversations**, **messages** - Legacy compatibility tables
+- **user_preferences**, **entities** - Structured knowledge storage
+
+### 3. Redis Cache
+
+Ephemeral session data and rate limiting:
+
+- Memory operation cooldowns
+- Session state caching
+- Quick-access temporary data
 
 ## Memory Tiers
 
-Memories are organized into tiers with different retention policies:
+The system implements a tiered memory architecture:
 
-| Tier | Retention Period | Use Case |
-|------|-----------------|----------|
-| `session` | 1 hour | Temporary conversation context |
-| `short` | 7 days | Recent events and interactions |
-| `medium` | 30 days | Important patterns and preferences |
-| `long` | 365 days | Significant events and knowledge |
-| `permanent` | Forever | Critical information (never auto-evicted) |
+| Tier | Retention | Use Case |
+|------|-----------|----------|
+| **session** | 1 hour | Current conversation context |
+| **short_term** | 7 days | Recent interactions |
+| **medium_term** | 30 days | Important recent facts |
+| **long_term** | 1 year | Significant knowledge |
+| **permanent** | Forever | Core facts, never evicted |
+
+### Automatic Eviction
+
+Unpinned memories are automatically evicted based on:
+- Tier retention policy
+- Last access time (`last_used_at`)
+- Pin status (pinned memories are never evicted)
 
 ## Memory Types
 
-- `fact`: Objective information about your home or preferences
-- `event`: Something that happened (state changes, activities)
-- `task`: Things to do or remember
-- `preference`: User likes/dislikes
-- `insight`: Learned patterns or observations
-- `entity`: Information about people, places, or things
-- `conversation`: Dialog context
-- `knowledge`: General information
-
-## API Endpoints
-
-### Add Memory
-```bash
-POST http://hassistant-letta-bridge:8081/memory/add
-Headers: x-api-key: <your-api-key>
-
-{
-  "title": "Memory title",
-  "content": "Detailed content",
-  "type": "event",
-  "tier": "short",
-  "tags": ["automation", "sensor"],
-  "source": ["ha://sensor.temperature"],
-  "confidence": 0.85,
-  "pin": false,
-  "generate_embedding": true
-}
+```python
+# Available memory types
+MemType = Literal[
+    "fact",         # Verified factual information
+    "event",        # Time-bound occurrences
+    "task",         # Action items or todos
+    "preference",   # User preferences
+    "insight",      # Derived knowledge
+    "entity",       # Named entities (people, places, things)
+    "note",         # Unstructured notes
+    "conversation", # Dialog excerpts
+    "knowledge"     # Structured knowledge
+]
 ```
 
-### Search Memories
+## API Usage Examples
+
+### Adding a Memory
+
 ```bash
-GET http://hassistant-letta-bridge:8081/memory/search?q=temperature&k=5&tiers=short,medium
-Headers: x-api-key: <your-api-key>
+curl -X POST http://localhost:8081/memory/add \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "type": "fact",
+    "title": "User prefers GLaDOS personality",
+    "content": "The user explicitly requested sarcastic, witty responses inspired by GLaDOS from Portal.",
+    "tags": ["preference", "personality"],
+    "source": ["user_conversation"],
+    "confidence": 0.95,
+    "tier": "long",
+    "pin": true,
+    "generate_embedding": true
+  }'
 ```
 
-### Pin/Unpin Memory
-```bash
-POST http://hassistant-letta-bridge:8081/memory/pin
-Headers: x-api-key: <your-api-key>
+### Searching Memories
 
-{
-  "id": "uuid-of-memory",
-  "pin": true
-}
+```bash
+# Semantic search
+curl "http://localhost:8081/memory/search?q=user%20personality%20preferences&k=5&tiers=long,permanent&types=fact,preference" \
+  -H "x-api-key: your-api-key"
+
+# Response includes cosine similarity scores for ranking
 ```
 
-### Forget Memory
-```bash
-POST http://hassistant-letta-bridge:8081/memory/forget
-Headers: x-api-key: <your-api-key>
+### Pinning a Memory
 
-{
-  "id": "uuid-of-memory",
-  "reason": "outdated information"
-}
+```bash
+curl -X POST http://localhost:8081/memory/pin \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "pin": true
+  }'
 ```
 
 ### Daily Brief
-```bash
-GET http://hassistant-letta-bridge:8081/daily_brief
-Headers: x-api-key: <your-api-key>
-```
-
-### Memory Maintenance
-```bash
-POST http://hassistant-letta-bridge:8081/memory/maintenance
-Headers: x-api-key: <your-api-key>
-```
-
-## Home Assistant Integration
-
-### REST Commands
-
-The following REST commands are configured in `configuration.yaml`:
-
-- `rest_command.letta_add_memory` - Add a new memory
-- `rest_command.letta_memory_maintenance` - Run cleanup
-
-### Sensors
-
-- `sensor.letta_daily_brief` - Shows recent important memories
-
-### Active Automations
-
-1. **Daily Memory Maintenance** (`letta_memory_maintenance`)
-   - Runs at 3:00 AM daily
-   - Cleans up old memories based on tier retention policies
-   
-2. **Log Important State Changes** (`letta_log_important_events`)
-   - Tracks presence changes (home/away)
-   - Saves to medium-term memory
-   - Automatically tagged and sourced
-
-### Example Usage in Automations
-
-```yaml
-# Log a temperature alert
-- service: rest_command.letta_add_memory
-  data:
-    title: "High Temperature Alert"
-    content: "Living room temperature reached {{ states('sensor.living_room_temp') }}°C"
-    tags: '["temperature", "alert", "living_room"]'
-    source: '["ha://sensor.living_room_temp"]'
-    tier: "medium"
-    type: "event"
-    confidence: 0.9
-```
-
-```yaml
-# Log a conversation insight
-- service: rest_command.letta_add_memory
-  data:
-    title: "User Preference: Lighting"
-    content: "User prefers warm white lighting in the evening"
-    tags: '["preference", "lighting", "evening"]'
-    tier: "long"
-    type: "preference"
-    confidence: 0.85
-    pin: true
-```
-
-## Configuration
-
-### Environment Variables
-
-Set in `.env` file or docker-compose.yml:
 
 ```bash
-# API Key for Letta Bridge
-BRIDGE_API_KEY=your-secure-api-key-here
+# Get important memories from last 24 hours
+curl "http://localhost:8081/daily_brief" \
+  -H "x-api-key: your-api-key"
+```
 
-# PostgreSQL connection
+## Database Schema
+
+### memory_blocks
+
+Core table for all memories:
+
+```sql
+CREATE TABLE memory_blocks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    type TEXT NOT NULL,              -- Memory type (fact, event, etc.)
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    tags TEXT[] DEFAULT '{}',        -- Categorization
+    source TEXT[] DEFAULT '{}',      -- Origin tracking
+    lineage TEXT[] DEFAULT '{}',     -- Memory derivation chain
+    confidence REAL DEFAULT 0.7,     -- Reliability score [0-1]
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    tier TEXT NOT NULL,              -- Retention tier
+    pin BOOLEAN DEFAULT FALSE,       -- Protected from eviction
+    meta JSONB DEFAULT '{}'          -- Flexible metadata
+);
+```
+
+### memory_embeddings
+
+Vector embeddings for semantic search:
+
+```sql
+CREATE TABLE memory_embeddings (
+    memory_id UUID REFERENCES memory_blocks(id) ON DELETE CASCADE,
+    embedding VECTOR(1536),          -- OpenAI ada-002 compatible
+    PRIMARY KEY (memory_id)
+);
+```
+
+### Indexes
+
+Optimized for common query patterns:
+
+- **GIN indexes**: tags, source, meta (fast array/JSON search)
+- **IVFFlat index**: vector embeddings (approximate nearest neighbor)
+- **btree indexes**: tier, type, timestamps (filtering/sorting)
+- **Full-text search**: title and content (keyword search)
+
+## Environment Configuration
+
+Required environment variables (see `.env.example`):
+
+```bash
+# PostgreSQL
+POSTGRES_PASSWORD=secure_random_password
 LETTA_PG_URI=postgresql://hassistant:password@hassistant-postgres:5432/hassistant
 
-# Redis connection
+# Redis
+REDIS_PASSWORD=secure_random_password
 LETTA_REDIS_URL=redis://:password@hassistant-redis:6379/0
 
-# Embedding dimension (default: 1536 for OpenAI ada-002)
+# Letta Bridge
+BRIDGE_API_KEY=secure_random_api_key
 EMBED_DIM=1536
-
-# Daily brief time window (hours)
 DAILY_BRIEF_WINDOW_HOURS=24
 ```
 
-### Security
+## Deployment
 
-1. **Change default API key**: Update `BRIDGE_API_KEY` in `.env`
-2. **Update HA configuration**: Change the `x-api-key` in `ha_config/configuration.yaml`
-3. **Change database passwords**: Update PostgreSQL and Redis passwords
+### Docker Compose
+
+Services are defined in `docker-compose.yml`:
+
+```bash
+# Start all services including memory stack
+docker compose up -d
+
+# Check service health
+docker compose ps
+docker compose logs letta-bridge
+docker compose logs postgres
+docker compose logs redis
+
+# Verify database initialization
+docker compose logs postgres | grep "Letta memory schema initialized"
+```
+
+### Database Initialization
+
+SQL scripts in `scripts/` run automatically on first startup:
+
+1. **01_enable_pgvector.sql** - Enable pgvector extension
+2. **02_letta_schema.sql** - Core Letta memory tables and functions
+3. **03_legacy_schema.sql** - Backward compatibility tables
+4. **04_indexes.sql** - Performance optimization indexes
+
+### Health Checks
+
+```bash
+# Letta Bridge health
+curl -H "x-api-key: your-key" http://localhost:8081/healthz
+
+# PostgreSQL connectivity
+docker exec hassistant-postgres pg_isready -U hassistant
+
+# Redis connectivity
+docker exec hassistant-redis redis-cli --raw incr ping
+```
 
 ## Maintenance
 
-### Manual Cleanup
+### Memory Eviction
 
-Run memory maintenance manually via Home Assistant:
-```yaml
-service: rest_command.letta_memory_maintenance
-```
+Automatic cleanup via SQL function:
 
-### Check Memory Usage
-
-Query the database directly:
 ```sql
--- Count memories by tier
-SELECT tier, COUNT(*) 
-FROM memory_blocks 
-GROUP BY tier;
+-- Run manually or via scheduled job
+SELECT * FROM evict_old_memories();
 
--- Find old memories
-SELECT tier, COUNT(*) 
-FROM memory_blocks 
-WHERE last_used_at < NOW() - INTERVAL '30 days'
-GROUP BY tier;
+-- Returns eviction counts by tier
 ```
 
-### Backup Important Memories
+### Memory Promotion
 
-Export memories before cleanup:
+Promote important short-term memories to long-term:
+
 ```sql
--- Export all pinned memories
-COPY (
-  SELECT * FROM memory_blocks WHERE pin = true
-) TO '/tmp/pinned_memories.csv' CSV HEADER;
+SELECT promote_memory_tier(
+    'memory-uuid-here'::UUID,
+    'long_term'
+);
 ```
 
-## Best Practices
+### Database Backups
 
-1. **Use appropriate tiers**: Don't store temporary data in `permanent` tier
-2. **Pin important memories**: Use `pin: true` for critical information
-3. **Add meaningful tags**: Make memories searchable with relevant tags
-4. **Include source**: Always track where information came from
-5. **Set confidence**: Reflect uncertainty in your confidence scores
-6. **Regular maintenance**: Let the daily cleanup run to prevent bloat
+```bash
+# Backup PostgreSQL
+docker exec hassistant-postgres pg_dump -U hassistant hassistant > backup.sql
+
+# Restore
+docker exec -i hassistant-postgres psql -U hassistant hassistant < backup.sql
+
+# Backup Redis
+docker exec hassistant-redis redis-cli SAVE
+docker cp hassistant-redis:/data/dump.rdb ./redis-backup.rdb
+```
+
+### Performance Monitoring
+
+```bash
+# Check index usage
+docker exec hassistant-postgres psql -U hassistant -d hassistant -c "
+SELECT schemaname, tablename, indexname, idx_scan, idx_tup_read, idx_tup_fetch
+FROM pg_stat_user_indexes
+WHERE schemaname = 'public'
+ORDER BY idx_scan DESC;
+"
+
+# Check table sizes
+docker exec hassistant-postgres psql -U hassistant -d hassistant -c "
+SELECT relname AS table_name,
+       pg_size_pretty(pg_total_relation_size(relid)) AS total_size
+FROM pg_catalog.pg_statio_user_tables
+ORDER BY pg_total_relation_size(relid) DESC;
+"
+```
+
+## Integration with Home Assistant
+
+The Qwen Agent can leverage memory for:
+
+1. **Context Persistence** - Remember user preferences across sessions
+2. **Personalization** - Adapt responses based on learned preferences
+3. **Task Management** - Store and retrieve task memories
+4. **Knowledge Base** - Build a persistent knowledge graph
+5. **Conversation History** - Reference past interactions
+
+### Example Integration (Qwen Agent)
+
+```python
+import httpx
+
+async def store_preference(title: str, content: str):
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "http://hassistant-letta-bridge:8081/memory/add",
+            headers={"x-api-key": os.getenv("BRIDGE_API_KEY")},
+            json={
+                "type": "preference",
+                "title": title,
+                "content": content,
+                "tier": "long",
+                "pin": True,
+                "tags": ["user_preference"],
+                "confidence": 0.9
+            }
+        )
+        return response.json()
+
+async def recall_relevant_memories(query: str, k: int = 5):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "http://hassistant-letta-bridge:8081/memory/search",
+            headers={"x-api-key": os.getenv("BRIDGE_API_KEY")},
+            params={
+                "q": query,
+                "k": k,
+                "tiers": "medium,long,permanent"
+            }
+        )
+        return response.json()
+```
 
 ## Troubleshooting
 
-### Memory not being added
+### Letta Bridge not starting
 
-1. Check API key is correct in both `.env` and `configuration.yaml`
-2. Verify letta-bridge service is running: `docker ps | grep letta-bridge`
-3. Check logs: `docker logs hassistant-letta-bridge`
+```bash
+# Check logs
+docker compose logs letta-bridge
 
-### Search not finding memories
+# Common issues:
+# - PostgreSQL not ready (wait for health check)
+# - Redis connection refused (check password)
+# - Port 8081 already in use
+```
 
-1. Ensure `generate_embedding: true` when adding memories
-2. Check pgvector extension is installed in PostgreSQL
-3. Verify embedding dimension matches (`EMBED_DIM`)
+### Vector search not working
 
-### Database growing too large
+```bash
+# Verify pgvector extension
+docker exec hassistant-postgres psql -U hassistant -d hassistant -c "SELECT * FROM pg_extension WHERE extname = 'vector';"
 
-1. Run manual maintenance: `rest_command.letta_memory_maintenance`
-2. Review pinned memories - unpin if no longer needed
-3. Adjust tier retention policies in database schema if needed
+# Check embedding indexes
+docker exec hassistant-postgres psql -U hassistant -d hassistant -c "\\d memory_embeddings"
+```
+
+### Slow search performance
+
+```bash
+# Reindex if data size changed significantly
+docker exec hassistant-postgres psql -U hassistant -d hassistant -c "
+REINDEX INDEX CONCURRENTLY idx_memory_embeddings_vector;
+ANALYZE memory_embeddings;
+"
+
+# Adjust IVFFlat lists parameter (sqrt of row count)
+# in scripts/04_indexes.sql and recreate index
+```
 
 ## Future Enhancements
 
-- Integration with LLM for automatic memory summarization
-- Smart memory promotion (moving important short-term to long-term)
-- Memory clustering and deduplication
-- Advanced search with filters and scoring
-- Memory visualization dashboard
+- [ ] Real embedding model (sentence-transformers, Ollama embeddings)
+- [ ] Automatic memory consolidation (merge similar memories)
+- [ ] Memory importance scoring (decay over time)
+- [ ] Graph-based memory relationships
+- [ ] Export/import memory snapshots
+- [ ] Web UI for memory management
+- [ ] A/B testing of embedding models
+- [ ] Memory usage analytics dashboard
+
+## References
+
+- [Letta (MemGPT) Documentation](https://github.com/cpacker/MemGPT)
+- [pgvector Documentation](https://github.com/pgvector/pgvector)
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [AsyncPG Documentation](https://magicstack.github.io/asyncpg/)
+
+## License
+
+MIT License - See LICENSE file for details
+>>>>>>> origin/copilot/fix-e9e049ad-c6a5-4a70-a747-ea989eb1320b
