@@ -8,6 +8,7 @@ A complete voice assistant implementation using Home Assistant's native features
 - **Voice Interaction**: Wyoming Whisper (STT) + Piper (TTS) with GLaDOS voice
 - **Raspberry Pi Client**: Wake word detection and voice processing
 - **Home Assistant Integration**: Native Assist API integration
+- **Memory System**: Letta Bridge with PostgreSQL + pgvector for contextual memory
 - **Dual GPU Support**: Automatic GPU allocation for optimal performance
 - **Multiple Models**: Switch between fast (Hermes-3 3B) and detailed (Qwen 2.5 7B) responses
 
@@ -23,12 +24,12 @@ A complete voice assistant implementation using Home Assistant's native features
 │ Home Assistant  │  Central hub + Assist API
 └────────┬────────┘
          │
-    ┌────┴────┐
-    │         │
-┌───▼───┐ ┌──▼──────┐
-│Ollama │ │ Wyoming │  LLM + STT/TTS services
-│  LLM  │ │ Services│
-└───────┘ └─────────┘
+    ┌────┴────┬─────────┐
+    │         │         │
+┌───▼───┐ ┌──▼──────┐ ┌▼──────────┐
+│Ollama │ │ Wyoming │ │Letta Bridge│  LLM + STT/TTS + Memory
+│  LLM  │ │ Services│ │ + pgvector │
+└───────┘ └─────────┘ └────────────┘
 ```
 
 ## Prerequisites
@@ -93,6 +94,32 @@ docker exec -it hassistant-ollama ollama list
 
 See [HA_ASSIST_SETUP.md](HA_ASSIST_SETUP.md) and [HA_VOICE_CONFIG.md](HA_VOICE_CONFIG.md) for detailed configuration.
 
+### 5. Test Memory Integration (Optional)
+
+The memory system is automatically integrated and running. Test it:
+
+```bash
+# Run the example client (requires requests library)
+pip install requests
+python3 example_memory_client.py
+
+# Or test via curl
+curl -X GET http://localhost:8081/healthz
+
+# Add a test memory
+curl -X POST http://localhost:8081/memory/add \
+  -H "x-api-key: dev-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Test Memory",
+    "content": "This is a test memory entry",
+    "type": "event",
+    "tier": "short"
+  }'
+```
+
+See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete memory system documentation.
+
 ## Configuration
 
 ### Environment Variables
@@ -156,6 +183,7 @@ python3 pi_client.py
 - [HA Assist Setup](HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
 - [HA Voice Config](HA_VOICE_CONFIG.md) - Voice pipeline setup
 - [Wyoming Setup](WYOMING_SETUP.md) - STT/TTS service configuration
+- [Memory Integration](MEMORY_INTEGRATION.md) - Memory system usage and API guide
 - [Pi Setup](PI_SETUP.md) - Raspberry Pi client setup
 - [Pi Ethernet Setup](PI_ETHERNET_SETUP.md) - Network configuration for Pi
 
@@ -169,11 +197,25 @@ HAssistant/
 │   └── modelfiles/             # LLM model definitions
 │       ├── Modelfile.hermes3
 │       └── Modelfile.qwen
+├── letta_bridge/              # Memory API service
+│   ├── main.py                # FastAPI memory endpoints
+│   ├── requirements.txt
+│   └── Dockerfile
+├── scripts/                   # Database initialization
+│   ├── 01_enable_pgvector.sql
+│   ├── 02_letta_schema.sql
+│   ├── 03_legacy_schema.sql
+│   └── 04_indexes.sql
+├── ha_config/                 # Home Assistant configuration
+│   ├── configuration.yaml     # Includes memory REST commands
+│   └── automations.yaml       # Memory automation examples
 ├── pi_client.py               # Raspberry Pi voice client
 ├── pi_client.env.example      # Pi client config template
+├── example_memory_client.py   # Python client example
 ├── whisper_data/              # STT model cache (auto-downloaded)
 ├── piper_data/                # TTS model cache (auto-downloaded)
 └── docs/                      # Setup guides
+    └── MEMORY_INTEGRATION.md  # Memory system documentation
 ```
 
 ## GPU Configuration

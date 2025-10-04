@@ -257,6 +257,24 @@ async def daily_brief(
         ]
     }
 
+@app.post("/memory/maintenance")
+async def memory_maintenance(_=Depends(auth), pg=Depends(get_pg)):
+    """
+    Run memory eviction based on tier age policies.
+    Should be called periodically (e.g., daily) to clean up old memories.
+    """
+    async with pg.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM evict_old_memories()")
+    
+    summary = {r["tier"]: r["evicted_count"] for r in rows}
+    total = sum(summary.values())
+    
+    return {
+        "status": "ok",
+        "total_evicted": total,
+        "by_tier": summary
+    }
+
 @app.get("/metrics")
 async def metrics():
     return {"uptime": "ok"}  # stub; add real metrics later
