@@ -71,4 +71,3 @@
 #         title: "Daily Memory Brief"
 #         message: "{{ state_attr('sensor.letta_daily_brief', 'items') | length }} memories from the past 24 hours"
 
-[]

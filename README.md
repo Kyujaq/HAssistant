@@ -94,6 +94,32 @@ docker exec -it hassistant-ollama ollama list
 
 See [HA_ASSIST_SETUP.md](HA_ASSIST_SETUP.md) and [HA_VOICE_CONFIG.md](HA_VOICE_CONFIG.md) for detailed configuration.
 
+### 5. Test Memory Integration (Optional)
+
+The memory system is automatically integrated and running. Test it:
+
+```bash
+# Run the example client (requires requests library)
+pip install requests
+python3 example_memory_client.py
+
+# Or test via curl
+curl -X GET http://localhost:8081/healthz
+
+# Add a test memory
+curl -X POST http://localhost:8081/memory/add \
+  -H "x-api-key: dev-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Test Memory",
+    "content": "This is a test memory entry",
+    "type": "event",
+    "tier": "short"
+  }'
+```
+
+See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete memory system documentation.
+
 ## Configuration
 
 ### Environment Variables
@@ -171,11 +197,25 @@ HAssistant/
 │   └── modelfiles/             # LLM model definitions
 │       ├── Modelfile.hermes3
 │       └── Modelfile.qwen
+├── letta_bridge/              # Memory API service
+│   ├── main.py                # FastAPI memory endpoints
+│   ├── requirements.txt
+│   └── Dockerfile
+├── scripts/                   # Database initialization
+│   ├── 01_enable_pgvector.sql
+│   ├── 02_letta_schema.sql
+│   ├── 03_legacy_schema.sql
+│   └── 04_indexes.sql
+├── ha_config/                 # Home Assistant configuration
+│   ├── configuration.yaml     # Includes memory REST commands
+│   └── automations.yaml       # Memory automation examples
 ├── pi_client.py               # Raspberry Pi voice client
 ├── pi_client.env.example      # Pi client config template
+├── example_memory_client.py   # Python client example
 ├── whisper_data/              # STT model cache (auto-downloaded)
 ├── piper_data/                # TTS model cache (auto-downloaded)
 └── docs/                      # Setup guides
+    └── MEMORY_INTEGRATION.md  # Memory system documentation
 ```
 
 ## GPU Configuration
