@@ -10,6 +10,8 @@ A complete voice assistant implementation using Home Assistant's native features
 - **Home Assistant Integration**: Native Assist API integration
 - **Dual GPU Support**: Automatic GPU allocation for optimal performance
 - **Multiple Models**: Switch between fast (Hermes-3 3B) and detailed (Qwen 2.5 7B) responses
+- **🧠 Memory Integration**: Letta-style persistent memory with PostgreSQL + pgvector for semantic search
+- **Context Awareness**: Redis-backed session caching for multi-turn conversations
 
 ## Architecture
 
@@ -23,12 +25,16 @@ A complete voice assistant implementation using Home Assistant's native features
 │ Home Assistant  │  Central hub + Assist API
 └────────┬────────┘
          │
-    ┌────┴────┐
-    │         │
-┌───▼───┐ ┌──▼──────┐
-│Ollama │ │ Wyoming │  LLM + STT/TTS services
-│  LLM  │ │ Services│
-└───────┘ └─────────┘
+    ┌────┴────────────────┐
+    │                     │
+┌───▼───┐ ┌──▼──────┐ ┌──▼──────────┐
+│Ollama │ │ Wyoming │ │ Letta Bridge│  LLM, STT/TTS, Memory
+│  LLM  │ │ Services│ │ + Postgres  │
+└───────┘ └─────────┘ └─────┬───────┘
+                            │
+                      ┌─────▼─────┐
+                      │   Redis   │  Session cache
+                      └───────────┘
 ```
 
 ## Prerequisites
@@ -150,9 +156,55 @@ python3 pi_client.py
    WAKE_WORD_MODEL=computer  # or custom .ppn file
    ```
 
+## Memory Integration
+
+HAssistant includes a sophisticated memory system inspired by Letta (formerly MemGPT) for persistent, context-aware AI interactions.
+
+### Features
+
+- **Tiered Memory**: 5-tier system (session, short-term, medium-term, long-term, permanent)
+- **Semantic Search**: Vector embeddings with pgvector for context-aware memory recall
+- **Automatic Eviction**: Time-based cleanup with pin protection for important memories
+- **REST API**: FastAPI service for memory operations (add, search, pin, forget)
+- **Daily Briefing**: Automatic summaries of important recent memories
+
+### Quick Start
+
+```bash
+# Memory API is available at http://localhost:8081
+# Test the health endpoint
+curl -H "x-api-key: dev-key" http://localhost:8081/healthz
+
+# Add a memory
+curl -X POST http://localhost:8081/memory/add \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: dev-key" \
+  -d '{
+    "type": "fact",
+    "title": "User prefers GLaDOS personality",
+    "content": "User likes sarcastic, witty responses",
+    "tier": "long",
+    "pin": true
+  }'
+
+# Search memories semantically
+curl "http://localhost:8081/memory/search?q=personality&k=5" \
+  -H "x-api-key: dev-key"
+```
+
+### Architecture
+
+- **Letta Bridge** (Port 8081): FastAPI service with memory endpoints
+- **PostgreSQL + pgvector**: Persistent storage with vector similarity search
+- **Redis**: Session caching and ephemeral data
+- **Database Schemas**: Automatic initialization via SQL scripts
+
+See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete documentation.
+
 ## Documentation
 
 - [Quick Start Guide](QUICK_START.md) - Fast setup walkthrough
+- [Memory Integration](MEMORY_INTEGRATION.md) - Letta-style memory system documentation
 - [HA Assist Setup](HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
 - [HA Voice Config](HA_VOICE_CONFIG.md) - Voice pipeline setup
 - [Wyoming Setup](WYOMING_SETUP.md) - STT/TTS service configuration
@@ -163,17 +215,33 @@ python3 pi_client.py
 
 ```
 HAssistant/
-├── docker-compose.yml          # Service orchestration
-├── .env                        # Environment configuration
+├── docker-compose.yml              # Service orchestration
+├── .env                            # Environment configuration
+├── .env.example                    # Environment template
+├── letta_bridge/                   # Memory API service
+│   ├── Dockerfile
+│   ├── main.py                     # FastAPI endpoints
+│   └── requirements.txt
+├── scripts/                        # Database initialization
+│   ├── 01_enable_pgvector.sql
+│   ├── 02_letta_schema.sql         # Core memory tables
+│   ├── 03_legacy_schema.sql        # Backward compatibility
+│   └── 04_indexes.sql              # Performance optimization
 ├── ollama/
-│   └── modelfiles/             # LLM model definitions
+│   └── modelfiles/                 # LLM model definitions
 │       ├── Modelfile.hermes3
 │       └── Modelfile.qwen
-├── pi_client.py               # Raspberry Pi voice client
-├── pi_client.env.example      # Pi client config template
-├── whisper_data/              # STT model cache (auto-downloaded)
-├── piper_data/                # TTS model cache (auto-downloaded)
-└── docs/                      # Setup guides
+├── qwen-agent/                     # AI orchestration service
+│   └── Dockerfile
+├── vision-gateway/                 # Vision processing service
+│   ├── Dockerfile
+│   └── app/main.py
+├── pi_client.py                    # Raspberry Pi voice client
+├── pi_client.env.example           # Pi client config template
+├── test_memory_integration.py      # Memory API test suite
+├── whisper_data/                   # STT model cache (auto-downloaded)
+├── piper_data/                     # TTS model cache (auto-downloaded)
+└── docs/                           # Setup guides
 ```
 
 ## GPU Configuration
