@@ -62,11 +62,17 @@ class ROITracker:
         x,y,w,h = [int(v) for v in box]
         crop = frame[y:y+h, x:x+w]
         f = self._features(crop)
+        
         # SSIM with baseline
         s = ssim(self.baseline["gray"], f["gray"], data_range=255)
-        dv = float((f["mean_hsv"][2] - self.baseline["mean_hsv"][2]) / max(1.0, self.baseline["mean_hsv"][2]))
-        dcontrast = float((f["contrast"] - self.baseline["contrast"]) / max(1.0, self.baseline["contrast"]))
-        dedge = float((f["edge"] - self.baseline["edge"]) / max(1.0, self.baseline["edge"]))
+        
+        # Calculate deltas
+        def calc_delta(new, old):
+            return float((new - old) / max(1.0, old))
+        
+        dv = calc_delta(f["mean_hsv"][2], self.baseline["mean_hsv"][2])
+        dcontrast = calc_delta(f["contrast"], self.baseline["contrast"])
+        dedge = calc_delta(f["edge"], self.baseline["edge"])
 
         now = time.time()
 
