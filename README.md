@@ -13,6 +13,7 @@ A complete voice assistant implementation using Home Assistant's native features
 - **Multiple Models**: Switch between fast (Hermes-3 3B) and detailed (Qwen 2.5 7B) responses
 - **Context Awareness**: Redis-backed session caching for multi-turn conversations
 - **Computer Control Agent**: Vision-based automation for controlling another computer (Excel, browsers, etc.)
+- **Windows Voice Assistant Control**: Control Windows laptops via audio cable and TTS output
 
 ## Architecture
 
@@ -203,6 +204,30 @@ Features:
 - Safe execution with confirmations and failsafes
 - Remote control via vision-gateway integration
 
+## Windows Voice Assistant Control
+
+Control Windows laptops using Windows Voice Assistant by routing Piper TTS audio through a USB audio dongle via 3.5mm aux cable.
+
+See [WINDOWS_VOICE_ASSIST_SETUP.md](WINDOWS_VOICE_ASSIST_SETUP.md) for complete setup guide.
+
+Quick setup:
+```bash
+# Configure USB audio device
+export USB_AUDIO_DEVICE=hw:1,0  # Your USB dongle
+
+# Use the USB audio version of pi_client
+cp pi_client_usb_audio.py pi_client.py
+
+# Or use the standalone control script
+python3 windows_voice_control.py "Open Notepad"
+```
+
+Features:
+- Control Windows via audio cable (no software installation needed)
+- Works with built-in Windows Voice Assistant/Cortana
+- Simple hardware setup (USB audio dongle + aux cable)
+- Integration with Home Assistant voice pipeline
+
 ### Wake Word Setup
 
 1. Get Porcupine access key from [Picovoice Console](https://console.picovoice.ai/)
@@ -266,6 +291,9 @@ See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete documentation.
 - [Wyoming Setup](WYOMING_SETUP.md) - STT/TTS service configuration
 - [Pi Setup](PI_SETUP.md) - Raspberry Pi client setup
 - [Pi Ethernet Setup](PI_ETHERNET_SETUP.md) - Network configuration for Pi
+- [Computer Control Agent](COMPUTER_CONTROL_AGENT.md) - Vision-based automation
+- [Computer Control Quick Start](COMPUTER_CONTROL_QUICK_START.md) - Fast setup for computer control
+- [Windows Voice Assistant Setup](WINDOWS_VOICE_ASSIST_SETUP.md) - Control Windows via audio cable
 
 ## Project Structure
 
