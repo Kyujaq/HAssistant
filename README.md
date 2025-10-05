@@ -203,6 +203,28 @@ Features:
 - Support for Excel, browsers, and desktop apps
 - Safe execution with confirmations and failsafes
 - Remote control via vision-gateway integration
+- **NEW: Windows Voice Control integration** - Use Windows Voice Assistant for command execution
+
+### Computer Control + Windows Voice Integration
+
+The Computer Control Agent can now execute commands via Windows Voice Assistant, combining AI-powered vision and decision making with voice-based execution.
+
+See [COMPUTER_CONTROL_WINDOWS_VOICE_INTEGRATION.md](COMPUTER_CONTROL_WINDOWS_VOICE_INTEGRATION.md) for complete integration guide.
+
+Quick usage:
+```bash
+# Enable Windows Voice mode via environment variable
+export USE_WINDOWS_VOICE=true
+
+# Or use command line flag
+python computer_control_agent.py --windows-voice --task "Open Notepad and type Hello"
+```
+
+This integration provides:
+- AI-powered computer control with Windows Voice Assistant execution
+- No software installation needed on Windows (uses built-in Voice Assistant)
+- Physical separation via audio cable for enhanced security
+- Flexible mode switching between direct control and voice control
 
 ## Windows Voice Assistant Control
 
