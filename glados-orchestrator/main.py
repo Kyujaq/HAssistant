@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Any, AsyncIterator
 from enum import Enum
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -115,6 +115,10 @@ def detect_complexity(query: str) -> QueryComplexity:
     # Default: SIMPLE for 11-15 word queries (prioritize speed)
     logger.info("Classified as SIMPLE (default)")
     return QueryComplexity.SIMPLE
+
+def messages_to_dict(messages: List[Message]) -> List[Dict[str, str]]:
+    """Convert Message objects to dict format for Ollama API"""
+    return [{"role": m.role, "content": m.content} for m in messages]
 
 async def retrieve_memory(query: str, limit: int = 5) -> List[Dict[str, Any]]:
     """Retrieve relevant memories from Letta Bridge"""
@@ -243,7 +247,7 @@ async def process_simple_query(messages: List[Message], temperature: float, user
     """Process simple query with Hermes only (fast path - NO MEMORY for speed)"""
     try:
         # Skip memory retrieval for simple queries to maximize speed
-        msgs = [{"role": m.role, "content": m.content} for m in messages]
+        msgs = messages_to_dict(messages)
 
         logger.info(f"Processing SIMPLE query (fast path - no memory)")
         # Limit to 100 tokens (~2-3 sentences) for speed
@@ -359,7 +363,7 @@ async def generate_stream(
         # For streaming, we route to the appropriate model(s)
         if complexity == QueryComplexity.SIMPLE:
             # Stream directly from Hermes
-            msgs = [{"role": m.role, "content": m.content} for m in messages]
+            msgs = messages_to_dict(messages)
             async for chunk in call_ollama_stream(HERMES_MODEL, msgs, temperature):
                 yield f"data: {json.dumps({'choices': [{'delta': {'content': chunk}, 'index': 0}]})}\n\n"
         else:

@@ -162,31 +162,12 @@ def extract_meeting_context(frame: np.ndarray, button_bbox: List[int]) -> Dict[s
 
     frame_shape = frame.shape
 
-    # Calculate zone bounding boxes
-    title_zone = calculate_zone_bbox(button_bbox, "title", frame_shape)
-    time_start_zone = calculate_zone_bbox(button_bbox, "time_start", frame_shape)
-    time_end_zone = calculate_zone_bbox(button_bbox, "time_end", frame_shape)
-    location_zone = calculate_zone_bbox(button_bbox, "location", frame_shape)
-    attendees_zone = calculate_zone_bbox(button_bbox, "attendees", frame_shape)
+    # Calculate zone bounding boxes and extract text
+    zones = {}
+    texts = {}
+    for zone_name in ZONE_CONFIG.keys():
+        zone_bbox = calculate_zone_bbox(button_bbox, zone_name, frame_shape)
+        zones[zone_name] = zone_bbox
+        texts[f"{zone_name}_text"] = extract_text_from_zone(frame, zone_bbox)
 
-    # Extract text from each zone
-    title_text = extract_text_from_zone(frame, title_zone)
-    time_start_text = extract_text_from_zone(frame, time_start_zone)
-    time_end_text = extract_text_from_zone(frame, time_end_zone)
-    location_text = extract_text_from_zone(frame, location_zone)
-    attendees_text = extract_text_from_zone(frame, attendees_zone)
-
-    return {
-        "title_text": title_text,
-        "time_start_text": time_start_text,
-        "time_end_text": time_end_text,
-        "location_text": location_text,
-        "attendees_text": attendees_text,
-        "zones": {
-            "title": title_zone,
-            "time_start": time_start_zone,
-            "time_end": time_end_zone,
-            "location": location_zone,
-            "attendees": attendees_zone
-        }
-    }
+    return {**texts, "zones": zones}

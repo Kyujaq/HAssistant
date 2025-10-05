@@ -8,16 +8,12 @@ import os
 import sys
 import time
 import logging
-import asyncio
 import subprocess
-from pathlib import Path
 from typing import Optional
 import uuid
-from datetime import datetime, timedelta
 
 import numpy as np
 import pvporcupine
-import sounddevice as sd
 import requests
 import pyaudio
 import wave
@@ -85,7 +81,8 @@ class GLaDOSPiClient:
         try:
             subprocess.run(['aplay', '-q', '/usr/share/sounds/alsa/Front_Center.wav'],
                           check=False, timeout=1)
-        except:
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            # Ignore if sound file not found or timeout
             pass
 
     def listen_for_wake_word(self):
