@@ -10,7 +10,7 @@ This guide explains how to control a Windows laptop using Windows Voice Assistan
 │                                                                 │
 │  ┌──────────────┐     ┌─────────────────┐                     │
 │  │   Piper TTS  │ ──► │ USB Audio Dongle│ ─────┐              │
-│  │  (GLaDOS)    │     │   (3.5mm out)   │      │              │
+│  │  (kathleen)  │     │   (3.5mm out)   │      │              │
 │  └──────────────┘     └─────────────────┘      │              │
 │                                                 │              │
 └─────────────────────────────────────────────────┼──────────────┘
@@ -37,6 +37,8 @@ This guide explains how to control a Windows laptop using Windows Voice Assistan
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+**Note:** The default setup uses GLaDOS voice, but for better Windows Voice Assistant recognition, it's recommended to use the clearer kathleen-high voice (see Section 5.2).
+
 ## Prerequisites
 
 ### Linux Server Side
@@ -44,6 +46,8 @@ This guide explains how to control a Windows laptop using Windows Voice Assistan
 2. USB audio dongle with 3.5mm output jack
 3. 3.5mm aux cable (male-to-male)
 4. ALSA or PulseAudio installed
+5. *Optional:* sox or ffmpeg (for volume boost feature)
+6. *Optional:* Piper with kathleen-high voice model (for clearer speech)
 
 ### Windows Laptop Side
 1. Windows 10/11 with Voice Assistant enabled
@@ -379,7 +383,52 @@ For better voice recognition:
    - Use noise cancellation in PulseAudio
    - Or use `sox` for audio filtering
 
-### 5.2 Latency Reduction
+### 5.2 Voice Clarity Enhancement (Recommended)
+
+For maximum clarity and reduced Windows Voice Assistant misunderstandings, use the kathleen-high voice model instead of GLaDOS:
+
+**Edit your `.env` or `windows_voice_control.env.example`:**
+
+```bash
+# Enable direct Piper with clearer voice
+USE_DIRECT_PIPER=true
+
+# Use kathleen-high voice (clearer than GLaDOS for Windows)
+PIPER_VOICE_MODEL=en_US-kathleen-high
+
+# Slow down speech by 10% for better recognition
+PIPER_LENGTH_SCALE=1.1
+
+# Optional: Boost volume if Windows doesn't hear reliably
+# Requires sox or ffmpeg installed
+PIPER_VOLUME_BOOST=1.0  # Set to 1.2 or 1.5 if needed
+```
+
+**Why this helps:**
+- kathleen-high has clearer pronunciation than GLaDOS
+- `length_scale=1.1` slows speech by 10%, giving Windows more time to process
+- Volume boost compensates for audio cable signal loss
+- Direct Piper invocation bypasses HTTP overhead
+
+**Install volume adjustment tools (optional):**
+```bash
+# For Debian/Ubuntu
+sudo apt-get install sox
+
+# Or use ffmpeg
+sudo apt-get install ffmpeg
+```
+
+**Test the clearer voice:**
+```bash
+# Load new configuration
+source .env
+
+# Test command
+python3 windows_voice_control.py "Hello Windows assistant, please open notepad"
+```
+
+### 5.3 Latency Reduction
 
 Minimize delay between TTS and Windows recognition:
 
@@ -396,7 +445,7 @@ pcm.!default {
 }
 ```
 
-### 5.3 Home Assistant Integration
+### 5.4 Home Assistant Integration
 
 Add to your Home Assistant `configuration.yaml`:
 
@@ -444,6 +493,14 @@ amixer -c 1 sget PCM
 2. Increase microphone boost in Windows sound settings
 3. Re-train Windows Voice Access with actual TTS voice
 4. Ensure cable is fully inserted into headset port (not line-in port)
+5. **Use clearer voice (highly recommended):**
+   ```bash
+   # In .env file:
+   USE_DIRECT_PIPER=true
+   PIPER_VOICE_MODEL=en_US-kathleen-high
+   PIPER_LENGTH_SCALE=1.1
+   ```
+   The kathleen-high voice is much clearer than GLaDOS for Windows Voice Assistant
 
 ### Issue: Audio too quiet or distorted
 
@@ -452,7 +509,11 @@ amixer -c 1 sget PCM
 # Adjust Linux output volume
 amixer -c 1 set PCM 85%
 
-# Normalize audio with sox (install: apt-get install sox)
+# Use built-in volume boost (requires sox or ffmpeg)
+# In .env file:
+PIPER_VOLUME_BOOST=1.5  # 150% volume
+
+# Or normalize audio with sox manually
 sox input.wav output.wav norm -3
 
 # Or use PulseAudio flat volumes
@@ -466,7 +527,16 @@ pactl set-sink-volume @DEFAULT_SINK@ 100%
 2. Ensure USB dongle has stable power
 3. Disable Windows mic enhancements (can cause issues):
    - Sound Settings → Recording → Microphone Properties → Enhancements → Disable all
-4. Use higher quality TTS voice model
+4. **Use clearer voice model:**
+   ```bash
+   USE_DIRECT_PIPER=true
+   PIPER_VOICE_MODEL=en_US-kathleen-high
+   PIPER_LENGTH_SCALE=1.1  # Slower = more reliable recognition
+   ```
+5. Increase speech length scale for even slower/clearer speech:
+   ```bash
+   PIPER_LENGTH_SCALE=1.2  # 20% slower
+   ```
 
 ### Issue: Computer Control Agent not working
 

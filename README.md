@@ -237,6 +237,11 @@ Quick setup:
 # Configure USB audio device
 export USB_AUDIO_DEVICE=hw:1,0  # Your USB dongle
 
+# Enable clearer voice for better recognition (recommended)
+export USE_DIRECT_PIPER=true
+export PIPER_VOICE_MODEL=en_US-kathleen-high
+export PIPER_LENGTH_SCALE=1.1
+
 # Use the USB audio version of pi_client
 cp pi_client_usb_audio.py pi_client.py
 
@@ -249,6 +254,10 @@ Features:
 - Works with built-in Windows Voice Assistant/Cortana
 - Simple hardware setup (USB audio dongle + aux cable)
 - Integration with Home Assistant voice pipeline
+- **NEW:** Clearer kathleen-high voice for improved recognition (reduces misunderstandings)
+- **NEW:** Adjustable speech speed and volume for optimal clarity
+
+For voice clarity optimization, see [WINDOWS_VOICE_CLARITY_GUIDE.md](WINDOWS_VOICE_CLARITY_GUIDE.md).
 
 ### Wake Word Setup
 

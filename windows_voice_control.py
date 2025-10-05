@@ -35,6 +35,112 @@ PULSEAUDIO_SINK = os.getenv('PULSEAUDIO_SINK', 'alsa_output.usb-default')
 # Wyoming protocol for Piper TTS (if using direct TCP connection)
 WYOMING_ENABLED = os.getenv('WYOMING_ENABLED', 'false').lower() == 'true'
 
+# Direct Piper TTS configuration (for Windows voice commands - clearer voice)
+USE_DIRECT_PIPER = os.getenv('USE_DIRECT_PIPER', 'false').lower() == 'true'
+PIPER_EXECUTABLE = os.getenv('PIPER_EXECUTABLE', '/usr/bin/piper')
+PIPER_VOICE_MODEL = os.getenv('PIPER_VOICE_MODEL', 'en_US-kathleen-high')  # Clearer voice for Windows
+PIPER_MODEL_PATH = os.getenv('PIPER_MODEL_PATH', '/usr/share/piper-voices')
+PIPER_LENGTH_SCALE = float(os.getenv('PIPER_LENGTH_SCALE', '1.1'))  # Slower speech for clarity
+PIPER_VOLUME_BOOST = float(os.getenv('PIPER_VOLUME_BOOST', '1.0'))  # Volume multiplier
+
+
+def synthesize_with_piper(text: str, output_file: str) -> bool:
+    """
+    Synthesize speech using direct Piper command for maximum clarity
+    
+    Args:
+        text: Text to synthesize
+        output_file: Output WAV file path
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Build Piper command
+        model_file = f"{PIPER_MODEL_PATH}/{PIPER_VOICE_MODEL}.onnx"
+        config_file = f"{PIPER_MODEL_PATH}/{PIPER_VOICE_MODEL}.onnx.json"
+        
+        cmd = [
+            PIPER_EXECUTABLE,
+            '--model', model_file,
+            '--config', config_file,
+            '--output_file', output_file,
+            '--length_scale', str(PIPER_LENGTH_SCALE)
+        ]
+        
+        # Run Piper with text input via stdin
+        result = subprocess.run(
+            cmd,
+            input=text.encode('utf-8'),
+            capture_output=True,
+            check=False
+        )
+        
+        if result.returncode != 0:
+            logger.error(f"Piper synthesis failed: {result.stderr.decode()}")
+            return False
+        
+        logger.info(f"✅ Synthesized with Piper (voice: {PIPER_VOICE_MODEL}, length_scale: {PIPER_LENGTH_SCALE})")
+        return True
+        
+    except FileNotFoundError:
+        logger.error(f"Piper executable not found at {PIPER_EXECUTABLE}")
+        return False
+    except Exception as e:
+        logger.error(f"Error synthesizing with Piper: {e}")
+        return False
+
+
+def adjust_audio_volume(input_file: str, output_file: str, volume: float) -> bool:
+    """
+    Adjust audio volume using sox/ffmpeg if available
+    
+    Args:
+        input_file: Input WAV file
+        output_file: Output WAV file
+        volume: Volume multiplier (e.g., 1.5 for 150%)
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if volume == 1.0:
+        # No adjustment needed
+        if input_file != output_file:
+            subprocess.run(['cp', input_file, output_file], check=True)
+        return True
+    
+    try:
+        # Try sox first (preferred for audio processing)
+        cmd = ['sox', input_file, output_file, 'vol', str(volume)]
+        result = subprocess.run(cmd, capture_output=True, check=False)
+        
+        if result.returncode == 0:
+            logger.info(f"✅ Volume adjusted to {volume}x using sox")
+            return True
+        
+        # Fallback to ffmpeg
+        cmd = [
+            'ffmpeg', '-i', input_file, '-af', f'volume={volume}',
+            '-y', output_file
+        ]
+        result = subprocess.run(cmd, capture_output=True, check=False)
+        
+        if result.returncode == 0:
+            logger.info(f"✅ Volume adjusted to {volume}x using ffmpeg")
+            return True
+        
+        logger.warning("Could not adjust volume (sox/ffmpeg not available)")
+        # Copy original file if volume adjustment fails
+        if input_file != output_file:
+            subprocess.run(['cp', input_file, output_file], check=True)
+        return True
+        
+    except Exception as e:
+        logger.warning(f"Volume adjustment failed: {e}, using original audio")
+        if input_file != output_file:
+            subprocess.run(['cp', input_file, output_file], check=True)
+        return True
+
 
 def speak_command(command: str, device: Optional[str] = None) -> bool:
     """
@@ -54,42 +160,58 @@ def speak_command(command: str, device: Optional[str] = None) -> bool:
     logger.info(f"🔊 Output device: {device}")
     
     try:
-        # Get TTS audio from Piper
-        # Note: This assumes Piper has an HTTP endpoint. 
-        # If using Wyoming protocol, you may need a different approach
-        
-        if WYOMING_ENABLED:
-            logger.warning("Wyoming protocol mode not yet implemented. Use HTTP mode.")
-            return False
-        
-        # HTTP request to Piper (if you have an HTTP wrapper around Wyoming)
-        response = requests.get(
-            f"{TTS_URL}/synthesize",
-            params={"text": command},
-            stream=True,
-            timeout=10
-        )
-        
-        if response.status_code != 200:
-            logger.error(f"TTS request failed: {response.status_code}")
-            return False
-        
         # Save audio temporarily
-        temp_file = f"/tmp/win_cmd_{int(time.time())}.wav"
-        with open(temp_file, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=4096):
-                f.write(chunk)
+        temp_audio = f"/tmp/win_cmd_{int(time.time())}.wav"
+        temp_adjusted = f"/tmp/win_cmd_adj_{int(time.time())}.wav"
         
-        logger.info(f"✅ TTS audio saved to {temp_file}")
+        # Choose synthesis method
+        if USE_DIRECT_PIPER:
+            # Use direct Piper command for clearer voice (kathleen-high)
+            logger.info(f"Using direct Piper (voice: {PIPER_VOICE_MODEL})")
+            success = synthesize_with_piper(command, temp_audio)
+            if not success:
+                logger.error("Direct Piper synthesis failed")
+                return False
+        else:
+            # Use HTTP endpoint (default GLaDOS voice via Wyoming)
+            if WYOMING_ENABLED:
+                logger.warning("Wyoming protocol mode not yet implemented. Use HTTP mode.")
+                return False
+            
+            # HTTP request to Piper (if you have an HTTP wrapper around Wyoming)
+            response = requests.get(
+                f"{TTS_URL}/synthesize",
+                params={"text": command},
+                stream=True,
+                timeout=10
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"TTS request failed: {response.status_code}")
+                return False
+            
+            # Save audio temporarily
+            with open(temp_audio, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=4096):
+                    f.write(chunk)
+        
+        logger.info(f"✅ TTS audio saved to {temp_audio}")
+        
+        # Apply volume adjustment if needed
+        if PIPER_VOLUME_BOOST != 1.0:
+            adjust_audio_volume(temp_audio, temp_adjusted, PIPER_VOLUME_BOOST)
+            playback_file = temp_adjusted
+        else:
+            playback_file = temp_audio
         
         # Play through specified audio device
         if USE_PULSEAUDIO:
             # Use PulseAudio
-            cmd = ['paplay', f'--device={PULSEAUDIO_SINK}', temp_file]
+            cmd = ['paplay', f'--device={PULSEAUDIO_SINK}', playback_file]
             logger.info(f"Playing via PulseAudio: {PULSEAUDIO_SINK}")
         else:
             # Use ALSA directly
-            cmd = ['aplay', '-D', device, '-q', temp_file]
+            cmd = ['aplay', '-D', device, '-q', playback_file]
             logger.info(f"Playing via ALSA: {device}")
         
         result = subprocess.run(cmd, check=False, capture_output=True, text=True)
@@ -97,11 +219,14 @@ def speak_command(command: str, device: Optional[str] = None) -> bool:
         if result.returncode != 0:
             logger.error(f"Audio playback failed: {result.stderr}")
             # Don't delete temp file for debugging
-            logger.info(f"Debug: Audio file kept at {temp_file}")
+            logger.info(f"Debug: Audio file kept at {playback_file}")
             return False
         
         # Clean up
-        os.remove(temp_file)
+        if os.path.exists(temp_audio):
+            os.remove(temp_audio)
+        if os.path.exists(temp_adjusted) and temp_adjusted != temp_audio:
+            os.remove(temp_adjusted)
         logger.info("✅ Command sent successfully")
         return True
         
