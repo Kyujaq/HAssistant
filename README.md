@@ -12,6 +12,7 @@ A complete voice assistant implementation using Home Assistant's native features
 - **Dual GPU Support**: Automatic GPU allocation for optimal performance
 - **Multiple Models**: Switch between fast (Hermes-3 3B) and detailed (Qwen 2.5 7B) responses
 - **Context Awareness**: Redis-backed session caching for multi-turn conversations
+- **Computer Control Agent**: Vision-based automation for controlling another computer (Excel, browsers, etc.)
 
 ## Architecture
 
@@ -172,6 +173,35 @@ cp pi_client.env.example pi_client.env
 # Run client
 python3 pi_client.py
 ```
+
+## Computer Control Agent
+
+The Computer Control Agent enables automated control of another computer using vision and AI. Perfect for automating tasks in Excel, browsers, and other GUI applications.
+
+See [COMPUTER_CONTROL_AGENT.md](COMPUTER_CONTROL_AGENT.md) for complete documentation.
+
+Quick setup:
+```bash
+# Install dependencies
+pip install -r computer_control_requirements.txt
+
+# Install Tesseract OCR (Ubuntu/Debian)
+sudo apt-get install tesseract-ocr
+
+# Copy configuration
+cp computer_control_agent.env.example computer_control_agent.env
+# Edit configuration as needed
+
+# Run a task
+python computer_control_agent.py --task "Open notepad"
+```
+
+Features:
+- Vision-based screen understanding with OCR
+- AI-powered decision making via Ollama
+- Support for Excel, browsers, and desktop apps
+- Safe execution with confirmations and failsafes
+- Remote control via vision-gateway integration
 
 ### Wake Word Setup
 

@@ -194,6 +194,13 @@ last_motion_ts: Dict[str,float] = {"hdmi":0.0}
 prev_gray_map: Dict[str,np.ndarray] = {}
 
 def process_frame(source: str, frame: np.ndarray) -> Dict[str,Any]:
+    # Store latest frame for API access
+    global latest_frames
+    latest_frames[source] = {
+        "image_b64": b64_jpg(frame),
+        "timestamp": time.time()
+    }
+    
     # Downscale for speed
     frame_ds = downscale_keep_long(frame, HDMI_RESIZE_LONG if source=="hdmi" else 1280)
     gray = cv2.cvtColor(frame_ds, cv2.COLOR_BGR2GRAY)
@@ -639,6 +646,30 @@ async def debug_page():
 def get_recent_detections():
     """API endpoint for recent detections"""
     return recent_detections
+
+# Store latest frames per source
+latest_frames: Dict[str, Dict[str, Any]] = {}  # source -> {"frame": np.ndarray, "timestamp": float}
+
+@app.get("/api/latest_frame/{source}")
+def get_latest_frame(source: str):
+    """
+    Get the latest frame from a specific source
+    
+    Args:
+        source: Source name (e.g., "frigate_hdmi", "hdmi", "local")
+    
+    Returns:
+        JSON with base64-encoded image and timestamp
+    """
+    if source not in latest_frames:
+        return {"error": f"No frames available for source '{source}'"}
+    
+    frame_data = latest_frames[source]
+    return {
+        "image": frame_data["image_b64"],
+        "timestamp": frame_data["timestamp"],
+        "source": source
+    }
 
 from fastapi.responses import HTMLResponse
 
