@@ -42,7 +42,6 @@ class ROITracker:
         self.tracker.init(frame, tuple(self.bbox))
         crop = frame[y:y+h, x:x+w]
         self.baseline = self._features(crop)
-        self.last_pressed_ts = 0.0
         self.init_time = time.time()  # Track when tracker was created
 
     def _features(self, crop):
@@ -68,18 +67,18 @@ class ROITracker:
         dv = float((f["mean_hsv"][2] - self.baseline["mean_hsv"][2]) / max(1.0, self.baseline["mean_hsv"][2]))
         dcontrast = float((f["contrast"] - self.baseline["contrast"]) / max(1.0, self.baseline["contrast"]))
         dedge = float((f["edge"] - self.baseline["edge"]) / max(1.0, self.baseline["edge"]))
-        # More conservative thresholds to avoid false positives
-        pressed = (s < 0.60) or (dv < -0.20) or (dcontrast < -0.30) or (dedge < -0.25)
+
         now = time.time()
 
-        # Warmup period: ignore presses for first 2 seconds after tracker init
-        if (now - self.init_time) < 2.0:
+        # Warmup period: ignore presses for first 1 second after tracker init
+        if (now - self.init_time) < 1.0:
             return {"ok": True, "pressed": False, "bbox":[x,y,w,h], "ssim":s, "dv":dv, "warmup": True}
 
-        sustained = pressed and (now - self.last_pressed_ts > 1.0)  # Require 1s sustained press
-        if pressed:
-            self.last_pressed_ts = now
-        return {"ok": True, "pressed": sustained, "bbox":[x,y,w,h], "ssim":s, "dv":dv, "dcontrast":dcontrast, "dedge":dedge}
+        # Detect press: button darkening (stricter thresholds)
+        # Use AND logic - multiple metrics must change for more reliability
+        pressed = (s < 0.55) and (dv < -0.15 or dcontrast < -0.25)
+
+        return {"ok": True, "pressed": pressed, "bbox":[x,y,w,h], "ssim":s, "dv":dv, "dcontrast":dcontrast, "dedge":dedge}
 
 _trackers: Dict[str, ROITracker] = {}  # key: source -> tracker
 
@@ -394,60 +393,74 @@ def frigate_stream_loop():
                     continue
 
                 if track_result.get("pressed"):
-                    # ===== BUTTON PRESSED! Capture snapshot and run Qwen analysis =====
-                    print(f"[frigate_stream] 🔥 BUTTON PRESS DETECTED! Running Qwen analysis...", flush=True)
+                    # ===== PRESS DETECTED! Wait and check if button disappears =====
+                    print(f"[frigate_stream] 👆 Press detected (SSIM={track_result['ssim']:.2f}, dv={track_result['dv']:.2f}), waiting for disappearance...", flush=True)
 
-                    # Use the tracker's bbox (already knows where the button is)
-                    tracked_bbox = track_result["bbox"]
+                    # Wait 0.5s for button to disappear (dialog closes)
+                    time.sleep(0.5)
 
-                    # Run OCR and Qwen VL analysis (Qwen extracts everything we need)
-                    ocr_boxes = ocr_with_boxes(frame_ds)
-                    crops = smart_crops(frame_ds, ocr_boxes)
-                    vl_result = call_qwen_vl(frame_ds, crops)
+                    # Check if button disappeared
+                    disappear_check = button_tracker.update_and_check(frame_ds)
 
-                    # Create button info from tracked bbox
-                    button_info = {
-                        "bbox": tracked_bbox,
-                        "keyword": "button",
-                        "text": "Tracked Button"
-                    }
+                    if not disappear_check.get("ok"):
+                        # ===== BUTTON DISAPPEARED! This is a real press =====
+                        print(f"[frigate_stream] 🔥 BUTTON DISAPPEARED! Triggering Qwen analysis...", flush=True)
 
-                    # Push HA event with Qwen's data only
-                    ha_event("vision.meeting_action", {
-                        "source": tracking_source,
-                        "action": "button_press",
-                        "button": button_info["keyword"],
-                        "vl": vl_result,
-                        "metrics": {"ssim": track_result["ssim"], "dv": track_result["dv"]}
-                    })
+                        # Use the last known bbox before disappearance
+                        tracked_bbox = track_result["bbox"]
 
-                    # Store detection
-                    result = {
-                        "invite_detected": vl_result.get("invite_detected", False),
-                        "button_pressed": True,
-                        "vl": vl_result,
-                        "anchor_button": button_info,
-                        "detection_mode": "press_triggered"
-                    }
+                        # Run OCR and Qwen VL analysis (Qwen extracts everything we need)
+                        ocr_boxes = ocr_with_boxes(frame_ds)
+                        crops = smart_crops(frame_ds, ocr_boxes)
+                        vl_result = call_qwen_vl(frame_ds, crops)
 
-                    # Store full-resolution image and coordinates (no scaling)
-                    # Browser will handle display scaling via CSS
-                    recent_detections.insert(0, {
-                        "timestamp": time.time(),
-                        "result": result,
-                        "frame_b64": b64_jpg(frame_ds),
-                        "button_bbox": tracked_bbox
-                    })
-                    recent_detections[:] = recent_detections[:10]
+                        # Create button info from tracked bbox
+                        button_info = {
+                            "bbox": tracked_bbox,
+                            "keyword": "button",
+                            "text": "Tracked Button"
+                        }
 
-                    print(f"[frigate_stream] ✅ Press captured! Qwen detected: {vl_result.get('invite_detected', False)}, title='{vl_result.get('title', '')[:40]}'", flush=True)
+                        # Push HA event with Qwen's data only
+                        ha_event("vision.meeting_action", {
+                            "source": tracking_source,
+                            "action": "button_press",
+                            "button": button_info["keyword"],
+                            "vl": vl_result,
+                            "metrics": {"ssim": track_result["ssim"], "dv": track_result["dv"]}
+                        })
 
-                    # Reset tracker after press
-                    button_tracker = None
-                    time.sleep(5)  # Cooldown after press
+                        # Store detection
+                        result = {
+                            "invite_detected": vl_result.get("invite_detected", False),
+                            "button_pressed": True,
+                            "vl": vl_result,
+                            "anchor_button": button_info,
+                            "detection_mode": "press_triggered"
+                        }
+
+                        # Store full-resolution image and coordinates (no scaling)
+                        # Browser will handle display scaling via CSS
+                        recent_detections.insert(0, {
+                            "timestamp": time.time(),
+                            "result": result,
+                            "frame_b64": b64_jpg(frame_ds),
+                            "button_bbox": tracked_bbox
+                        })
+                        recent_detections[:] = recent_detections[:10]
+
+                        print(f"[frigate_stream] ✅ Press captured! Qwen detected: {vl_result.get('invite_detected', False)}, title='{vl_result.get('title', '')[:40]}'", flush=True)
+
+                        # Reset tracker after press
+                        button_tracker = None
+                        time.sleep(5)  # Cooldown after processing
+                    else:
+                        # Button still there - false positive, keep tracking
+                        print(f"[frigate_stream] ⚠️  Button still visible after press - false positive, continuing tracking...", flush=True)
+                        time.sleep(0.1)  # Poll at 10 FPS
                 else:
                     # Still tracking, no press yet
-                    time.sleep(1.0)  # Poll at 1 FPS when tracking (balance speed vs CPU)
+                    time.sleep(0.1)  # Poll at 10 FPS when tracking (fast enough to catch clicks)
                 continue
 
             # ===== Phase 1: Lightweight scan for buttons (no tracking yet) =====
@@ -468,11 +481,18 @@ def frigate_stream_loop():
 
                 print(f"[frigate_stream] 👁️  Found {primary_button['keyword']} button at ({primary_button['bbox'][0]}, {primary_button['bbox'][1]}), starting visual tracking...", flush=True)
 
-                # Initialize tracker on this button (use full frame for tracking)
+                # Initialize tracker on expanded button area (2.5x wider, 3.5x taller for stability)
                 x, y, w, h = primary_button["bbox"]
-                button_tracker = ROITracker(frame_ds, (x, y, w, h))
+                expanded_w = int(w * 2.5)
+                expanded_h = int(h * 3.5)
+                # Keep expanded box within frame bounds
+                h_frame, w_frame = frame_ds.shape[:2]
+                expanded_w = min(expanded_w, w_frame - x)
+                expanded_h = min(expanded_h, h_frame - y)
 
-                time.sleep(3)  # Wait longer before checking press to avoid false positives
+                button_tracker = ROITracker(frame_ds, (x, y, expanded_w, expanded_h))
+
+                time.sleep(2)  # Short wait before checking for press
             else:
                 # No buttons, keep scanning
                 time.sleep(5)
