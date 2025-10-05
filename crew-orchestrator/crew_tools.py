@@ -5,9 +5,20 @@ These tools provide the interface between CrewAI agents and the actual
 voice command and vision verification systems.
 """
 
+import os
+import time
+import logging
+from typing import Type, Optional
 from crewai_tools import BaseTool
-from typing import Type
 from pydantic import BaseModel, Field
+import requests
+
+# Logging
+logger = logging.getLogger("crew-orchestrator.tools")
+
+# Configuration
+WINDOWS_VOICE_CONTROL_URL = os.getenv("WINDOWS_VOICE_CONTROL_URL", "http://localhost:8085")
+VISION_GATEWAY_URL = os.getenv("VISION_GATEWAY_URL", "http://vision-gateway:8088")
 
 
 class VoiceCommandInput(BaseModel):
@@ -34,8 +45,24 @@ class VoiceCommandTool(BaseTool):
         Returns:
             Status message indicating the command was executed
         """
-        # Placeholder implementation
-        # In production, this would call the Windows Voice Control service
+        logger.info(f"[VOICE TOOL] Speaking: '{command}'")
+        
+        # TODO: Implement actual integration with windows_voice_control service
+        # try:
+        #     response = requests.post(
+        #         f"{WINDOWS_VOICE_CONTROL_URL}/speak",
+        #         json={"text": command},
+        #         timeout=10
+        #     )
+        #     if response.status_code == 200:
+        #         return f"Voice command executed successfully: '{command}'"
+        #     else:
+        #         return f"Voice command failed: {response.text}"
+        # except Exception as e:
+        #     logger.error(f"Error executing voice command: {e}")
+        #     return f"Voice command error: {str(e)}"
+        
+        # Placeholder for now
         return f"Voice command executed: '{command}'"
 
 
@@ -63,40 +90,25 @@ class VisionVerificationTool(BaseTool):
         Returns:
             The answer from the vision system (yes/no)
         """
-        # Placeholder implementation
-        # In production, this would call the Vision Gateway service
+        logger.info(f"[VISION TOOL] Verifying: '{question}'")
+        
+        # TODO: Implement actual integration with vision-gateway service
+        # try:
+        #     response = requests.post(
+        #         f"{VISION_GATEWAY_URL}/query",
+        #         json={"question": question},
+        #         timeout=30
+        #     )
+        #     if response.status_code == 200:
+        #         result = response.json()
+        #         answer = result.get("answer", "Unknown")
+        #         return f"Vision verification: '{question}' - {answer}"
+        #     else:
+        #         return f"Vision verification failed: {response.text}"
+        # except Exception as e:
+        #     logger.error(f"Error in vision verification: {e}")
+        #     return f"Vision verification error: {str(e)}"
+        
+        # Placeholder for now - simulate verification delay
+        time.sleep(2)
         return f"Vision verification: '{question}' - Yes (placeholder)"
-import requests
-import time
-from crewai_tools import BaseTool
-
-# Placeholder for the actual voice control script/API call
-def speak_command_to_windows(command: str):
-    """Simulates speaking a command to the Windows Voice Assistant."""
-    print(f"[VOICE TOOL] Speaking: '{command}'")
-    # In a real implementation, this would call the windows_voice_control.py
-    # script or trigger it via an MQTT message.
-    return f"Successfully spoke the command: {command}"
-
-class VoiceCommandTool(BaseTool):
-    name: str = "Windows Voice Command Tool"
-    description: str = "Speaks a concise command phrase to the Windows Voice Assistant to perform a UI action. Use this to interact with the computer."
-
-    def _run(self, command: str) -> str:
-        return speak_command_to_windows(command)
-
-# Placeholder for the actual vision gateway API call
-def query_vision_gateway(query: str) -> str:
-    """Simulates asking the vision gateway a question about the screen."""
-    print(f"[VISION TOOL] Verifying: '{query}'")
-    # In a real implementation, this would make an HTTP request to the vision-gateway service.
-    # For now, we simulate a positive response.
-    time.sleep(2) # Simulate time taken for analysis
-    return "Yes, the state has been verified."
-
-class VisionVerificationTool(BaseTool):
-    name: str = "Screen Verification Tool"
-    description: str = "Asks a simple, yes/no question to the vision model to verify the state of the screen after an action has been performed."
-
-    def _run(self, query: str) -> str:
-        return query_vision_gateway(query)
