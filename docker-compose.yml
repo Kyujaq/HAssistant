@@ -316,6 +316,19 @@ services:
     networks:
       - ha_network
   
+  # Crew Orchestrator - Excel task automation
+  crew-orchestrator:
+    build: ./crew-orchestrator
+    container_name: hassistant-crew-orchestrator
+    env_file: .env
+    ports:
+      - "8084:8084"
+    depends_on:
+      - ollama-chat
+    networks:
+      - ha_network
+    restart: unless-stopped
+
   # Computer Control Agent (optional, for remote computer automation)
   # Uncomment to enable computer control capabilities
   # computer-control-agent:
