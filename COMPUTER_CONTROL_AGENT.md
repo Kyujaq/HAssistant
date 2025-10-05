@@ -9,6 +9,16 @@ The Computer Control Agent enables automated control of another computer using v
 - **Safe Execution**: Confirmation prompts and failsafe mechanisms to prevent accidents
 - **Excel Support**: Specialized functions for working with Excel spreadsheets
 - **Flexible Actions**: Supports mouse clicks, keyboard input, hotkeys, scrolling, and more
+- **Windows Voice Integration**: Can execute commands via Windows Voice Assistant (see [integration guide](COMPUTER_CONTROL_WINDOWS_VOICE_INTEGRATION.md))
+
+## Execution Modes
+
+The agent supports two execution modes:
+
+1. **Direct Control Mode** (Default) - Uses PyAutoGUI for direct mouse/keyboard control
+2. **Windows Voice Mode** - Routes commands through Windows Voice Assistant via audio cable
+
+See [COMPUTER_CONTROL_WINDOWS_VOICE_INTEGRATION.md](COMPUTER_CONTROL_WINDOWS_VOICE_INTEGRATION.md) for details on Windows Voice integration.
 
 ## Architecture
 
@@ -75,6 +85,9 @@ Required packages:
    OLLAMA_URL=http://localhost:11434
    OLLAMA_MODEL=qwen3:4b-instruct-2507-q4_K_M
    
+   # Execution Mode
+   USE_WINDOWS_VOICE=false  # Set to 'true' to use Windows Voice Control
+   
    # Safety Settings
    CONFIRM_BEFORE_ACTION=true  # Require confirmation before each action
    MAX_ACTIONS_PER_TASK=50     # Maximum number of actions per task
@@ -97,6 +110,11 @@ python computer_control_agent.py --info
 **Run a simple task:**
 ```bash
 python computer_control_agent.py --task "Open notepad and type Hello World"
+```
+
+**Run task with Windows Voice mode:**
+```bash
+python computer_control_agent.py --windows-voice --task "Open notepad and type Hello World"
 ```
 
 **Excel-specific task:**

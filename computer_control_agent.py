@@ -38,6 +38,9 @@ HA_TOKEN = os.getenv('HA_TOKEN', '')
 OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3:4b-instruct-2507-q4_K_M')
 
+# Execution mode - can use Windows Voice Control instead of direct PyAutoGUI
+USE_WINDOWS_VOICE = os.getenv('USE_WINDOWS_VOICE', 'false').lower() == 'true'
+
 # Safety settings
 CONFIRM_BEFORE_ACTION = os.getenv('CONFIRM_BEFORE_ACTION', 'true').lower() == 'true'
 MAX_ACTIONS_PER_TASK = int(os.getenv('MAX_ACTIONS_PER_TASK', '50'))
@@ -50,12 +53,37 @@ pyautogui.PAUSE = 0.5  # Pause between actions for safety
 class ComputerControlAgent:
     """Agent that can control a computer using vision and AI"""
 
-    def __init__(self):
+    def __init__(self, use_windows_voice=None):
         self.action_count = 0
         self.task_history = []
-        logger.info("🤖 Computer Control Agent initialized")
-        logger.info(f"   Vision Gateway: {VISION_GATEWAY_URL}")
-        logger.info(f"   Ollama: {OLLAMA_URL}")
+        
+        # Use parameter if provided, otherwise use environment variable
+        if use_windows_voice is None:
+            use_windows_voice = USE_WINDOWS_VOICE
+        
+        self.use_windows_voice = use_windows_voice
+        self.windows_voice_bridge = None
+        
+        if use_windows_voice:
+            try:
+                from windows_voice_control import speak_command, type_text, send_keystroke, open_application
+                self.windows_voice_bridge = {
+                    'speak_command': speak_command,
+                    'type_text': type_text,
+                    'send_keystroke': send_keystroke,
+                    'open_application': open_application
+                }
+                logger.info("🤖 Computer Control Agent initialized (Windows Voice Mode)")
+                logger.info("   Using Windows Voice Assistant for command execution")
+            except ImportError:
+                logger.warning("Windows voice control not available, falling back to direct control")
+                self.use_windows_voice = False
+        
+        if not use_windows_voice:
+            logger.info("🤖 Computer Control Agent initialized (Direct Control Mode)")
+            logger.info(f"   Vision Gateway: {VISION_GATEWAY_URL}")
+            logger.info(f"   Ollama: {OLLAMA_URL}")
+        
         logger.info(f"   Safety: Confirm={CONFIRM_BEFORE_ACTION}, Max Actions={MAX_ACTIONS_PER_TASK}")
 
     def get_screenshot(self, source: str = "local") -> Optional[np.ndarray]:
@@ -182,6 +210,84 @@ class ComputerControlAgent:
             logger.error(f"Error asking LLM: {e}")
             return ""
 
+    def execute_action_via_windows_voice(self, action: Dict[str, Any]) -> bool:
+        """
+        Execute action using Windows Voice Control
+        
+        Args:
+            action: Action dictionary with 'type' and parameters
+            
+        Returns:
+            True if successful
+        """
+        if not self.windows_voice_bridge:
+            logger.error("Windows Voice Control not available")
+            return False
+        
+        action_type = action.get('type', '')
+        params = action.get('params', {})
+        
+        try:
+            if action_type == 'type':
+                # Use Windows voice "Type text" command
+                return self.windows_voice_bridge['type_text'](params['text'])
+                
+            elif action_type == 'press':
+                # Use Windows voice "Press key" command
+                return self.windows_voice_bridge['send_keystroke'](params['key'])
+                
+            elif action_type == 'hotkey':
+                # Convert hotkey to Windows voice command
+                keys = params['keys']
+                # For common hotkeys like Ctrl+C, use Windows voice format
+                if len(keys) == 2:
+                    return self.windows_voice_bridge['speak_command'](f"Press {keys[0]} {keys[1]}")
+                else:
+                    return self.windows_voice_bridge['speak_command'](f"Press {' '.join(keys)}")
+                    
+            elif action_type == 'open_application':
+                # Use Windows voice "Open app" command
+                return self.windows_voice_bridge['open_application'](params.get('name', ''))
+                
+            elif action_type in ['click', 'double_click', 'right_click', 'move']:
+                # Windows Voice Access supports click by number/label
+                # This is more complex, use a generic command
+                logger.warning(f"Action type '{action_type}' requires Windows Voice Access numbers mode")
+                # Try to find text at location and click
+                if 'text' in params:
+                    return self.windows_voice_bridge['speak_command'](f"Click {params['text']}")
+                else:
+                    # Can't directly click coordinates via voice
+                    logger.error("Cannot execute click action via Windows voice without text label")
+                    return False
+                    
+            elif action_type == 'scroll':
+                # Windows voice scroll command
+                amount = params['amount']
+                direction = "up" if amount > 0 else "down"
+                return self.windows_voice_bridge['speak_command'](f"Scroll {direction}")
+                
+            elif action_type == 'wait':
+                # Just wait locally
+                import time
+                time.sleep(params['duration'])
+                return True
+                
+            elif action_type == 'find_and_click':
+                # Use Windows voice to click by text
+                text = params['text']
+                return self.windows_voice_bridge['speak_command'](f"Click {text}")
+                
+            else:
+                # Try to send as generic voice command
+                logger.warning(f"Unknown action type '{action_type}', trying generic voice command")
+                command_str = f"{action_type} {' '.join(str(v) for v in params.values())}"
+                return self.windows_voice_bridge['speak_command'](command_str)
+                
+        except Exception as e:
+            logger.error(f"Error executing action via Windows voice: {e}")
+            return False
+
     def execute_action(self, action: Dict[str, Any]) -> bool:
         """
         Execute a single action
@@ -205,6 +311,15 @@ class ComputerControlAgent:
                 logger.info("Action cancelled by user")
                 return False
         
+        # Route to Windows Voice Control if enabled
+        if self.use_windows_voice:
+            success = self.execute_action_via_windows_voice(action)
+            if success:
+                self.action_count += 1
+                self.task_history.append(action)
+            return success
+        
+        # Otherwise use direct control
         try:
             if action_type == 'click':
                 x, y = action['params']['x'], action['params']['y']
@@ -454,10 +569,12 @@ def main():
     parser.add_argument('--excel', action='store_true', help='Excel-specific task')
     parser.add_argument('--context', type=str, help='Context for the task')
     parser.add_argument('--info', action='store_true', help='Get screen information')
+    parser.add_argument('--windows-voice', action='store_true', 
+                        help='Use Windows Voice Control for command execution')
     
     args = parser.parse_args()
     
-    agent = ComputerControlAgent()
+    agent = ComputerControlAgent(use_windows_voice=args.windows_voice)
     
     if args.info:
         info = agent.get_screen_info()
@@ -475,6 +592,7 @@ def main():
         print("  python computer_control_agent.py --task 'Open notepad'")
         print("  python computer_control_agent.py --excel --task 'Create a new spreadsheet'")
         print("  python computer_control_agent.py --info")
+        print("  python computer_control_agent.py --windows-voice --task 'Open notepad'")
         sys.exit(1)
 
 
