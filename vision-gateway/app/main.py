@@ -223,17 +223,6 @@ def process_frame(source: str, frame: np.ndarray) -> Dict[str,Any]:
     # Smart crops
     crops = smart_crops(frame_ds, boxes)
 
-    # If we see an action word, lock tracker
-    #for b in boxes:
-    #    t = b["text"].lower()
-    #    if re.search(r"\b(accept|decline|send)\b", t):
-    #        # expand a bit and start tracker for this source
-    #        x,y,w,h = b["bbox"]; pad = int(max(w,h)*0.5)
-    #        x,y = max(0,x-pad), max(0,y-pad)
-    #        w,h = min(frame_ds.shape[1]-x, w+2*pad), min(frame_ds.shape[0]-y, h+2*pad)
-    #       _trackers[source] = ROITracker(frame_ds, (x,y,w,h))
-    #        break
-
     # Call VL to interpret (optional but recommended)
     vl = call_qwen_vl(frame_ds, crops)
 
@@ -299,24 +288,29 @@ def healthz():
 
 # ---- Debug endpoints and Frigate stream integration ----
 recent_detections = []  # Store last 10 detections
+FRIGATE_API = "http://frigate:5000/api/ugreen_camera/latest.jpg"
+
+def fetch_frigate_frame() -> Optional[np.ndarray]:
+    """Fetch and decode a frame from Frigate API"""
+    try:
+        resp = requests.get(FRIGATE_API, timeout=5)
+        if resp.status_code != 200:
+            print(f"[frigate_stream] Failed to fetch frame: {resp.status_code}", flush=True)
+            return None
+        
+        img_array = np.frombuffer(resp.content, np.uint8)
+        frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        return frame
+    except Exception as e:
+        print(f"[frigate_stream] Error fetching frame: {e}", flush=True)
+        return None
 
 def frigate_stream_loop_legacy():
     """Legacy full-screen OCR mode (original implementation)"""
-    FRIGATE_API = "http://frigate:5000/api/ugreen_camera/latest.jpg"
 
     while True:
         try:
-            # Fetch latest frame from Frigate
-            resp = requests.get(FRIGATE_API, timeout=5)
-            if resp.status_code != 200:
-                print(f"[frigate_stream] Failed to fetch frame: {resp.status_code}", flush=True)
-                time.sleep(5)
-                continue
-
-            # Decode image
-            img_array = np.frombuffer(resp.content, np.uint8)
-            frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
+            frame = fetch_frigate_frame()
             if frame is None:
                 time.sleep(5)
                 continue
@@ -359,24 +353,13 @@ def frigate_stream_loop():
         return frigate_stream_loop_legacy()
 
     print("[frigate_stream] Using press-triggered detection mode", flush=True)
-    FRIGATE_API = "http://frigate:5000/api/ugreen_camera/latest.jpg"
 
     button_tracker = None  # Track button visually
     tracking_source = "frigate_hdmi"
 
     while True:
         try:
-            # Fetch latest frame from Frigate
-            resp = requests.get(FRIGATE_API, timeout=5)
-            if resp.status_code != 200:
-                print(f"[frigate_stream] Failed to fetch frame: {resp.status_code}", flush=True)
-                time.sleep(5)
-                continue
-
-            # Decode image
-            img_array = np.frombuffer(resp.content, np.uint8)
-            frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
+            frame = fetch_frigate_frame()
             if frame is None:
                 time.sleep(5)
                 continue
