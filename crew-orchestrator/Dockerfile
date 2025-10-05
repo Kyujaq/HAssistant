@@ -1,12 +1,8 @@
 FROM python:3.11-slim
 
-
-COPY . .
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8084"]
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PORT=8083
+    PORT=8084
 
 WORKDIR /app
 
@@ -17,6 +13,6 @@ RUN pip install --upgrade pip && \
 COPY crew_tools.py /app/crew_tools.py
 COPY main.py /app/main.py
 
-EXPOSE 8083
+EXPOSE 8084
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8083"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8084"]
