@@ -28,18 +28,21 @@ class TestWindowsVoiceControl(unittest.TestCase):
         os.environ['USB_AUDIO_DEVICE'] = 'hw:1,0'
         os.environ['TTS_URL'] = 'http://localhost:10200'
         os.environ['USE_PULSEAUDIO'] = 'false'
+        os.environ['USE_DIRECT_PIPER'] = 'false'  # Default to HTTP for tests
         
     def tearDown(self):
         """Clean up after tests"""
         # Reset environment
-        if 'USB_AUDIO_DEVICE' in os.environ:
-            del os.environ['USB_AUDIO_DEVICE']
+        for key in ['USB_AUDIO_DEVICE', 'USE_DIRECT_PIPER']:
+            if key in os.environ:
+                del os.environ[key]
     
     @patch('windows_voice_control.requests')
     @patch('windows_voice_control.subprocess.run')
     @patch('windows_voice_control.os.remove')
+    @patch('windows_voice_control.os.path.exists')
     @patch('builtins.open', new_callable=mock_open)
-    def test_speak_command_success(self, mock_file, mock_remove, mock_subprocess, mock_requests):
+    def test_speak_command_success(self, mock_file, mock_exists, mock_remove, mock_subprocess, mock_requests):
         """Test successful voice command"""
         # Mock HTTP response
         mock_response = Mock()
@@ -53,12 +56,16 @@ class TestWindowsVoiceControl(unittest.TestCase):
         mock_result.stderr = ""
         mock_subprocess.return_value = mock_result
         
+        # Mock os.path.exists to return True for cleanup
+        mock_exists.return_value = True
+        
         result = speak_command("Open Notepad", "hw:1,0")
         
         self.assertTrue(result)
         mock_requests.get.assert_called_once()
         mock_subprocess.assert_called_once()
-        mock_remove.assert_called_once()
+        # At least one remove call for the temp file
+        self.assertTrue(mock_remove.call_count >= 1)
     
     @patch('windows_voice_control.requests')
     def test_speak_command_tts_failure(self, mock_requests):
@@ -213,6 +220,75 @@ class TestErrorHandling(unittest.TestCase):
         result = speak_command("Test")
         
         self.assertFalse(result)
+
+
+class TestDirectPiperMode(unittest.TestCase):
+    """Test direct Piper TTS functionality"""
+    
+    def setUp(self):
+        """Set up test fixtures"""
+        os.environ['USE_DIRECT_PIPER'] = 'true'
+        os.environ['PIPER_VOICE_MODEL'] = 'en_US-kathleen-high'
+        os.environ['PIPER_LENGTH_SCALE'] = '1.1'
+        os.environ['USB_AUDIO_DEVICE'] = 'hw:1,0'
+    
+    def tearDown(self):
+        """Clean up after tests"""
+        for key in ['USE_DIRECT_PIPER', 'PIPER_VOICE_MODEL', 'PIPER_LENGTH_SCALE']:
+            if key in os.environ:
+                del os.environ[key]
+    
+    @patch('windows_voice_control.subprocess.run')
+    @patch('windows_voice_control.os.path.exists')
+    @patch('windows_voice_control.os.remove')
+    def test_direct_piper_synthesis(self, mock_remove, mock_exists, mock_subprocess):
+        """Test direct Piper synthesis command"""
+        # Reload module to pick up USE_DIRECT_PIPER=true
+        import importlib
+        import windows_voice_control
+        importlib.reload(windows_voice_control)
+        
+        from windows_voice_control import synthesize_with_piper
+        
+        # Mock successful Piper execution
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stderr = b""
+        
+        # Mock for playback (aplay)
+        mock_subprocess.side_effect = [mock_result, mock_result]
+        mock_exists.return_value = True
+        
+        # Test synthesis
+        success = synthesize_with_piper("Test command", "/tmp/test.wav")
+        
+        self.assertTrue(success)
+        # Check that piper was called with correct arguments
+        calls = mock_subprocess.call_args_list[0]
+        args = calls[0][0] if calls[0] else calls[1]['args']
+        self.assertIn('--length_scale', args)
+        self.assertIn('1.1', args)
+        self.assertIn('--model', args)
+    
+    @patch('windows_voice_control.subprocess.run')
+    def test_volume_adjustment_with_sox(self, mock_subprocess):
+        """Test volume adjustment using sox"""
+        from windows_voice_control import adjust_audio_volume
+        
+        # Mock successful sox execution
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_subprocess.return_value = mock_result
+        
+        success = adjust_audio_volume("/tmp/in.wav", "/tmp/out.wav", 1.5)
+        
+        self.assertTrue(success)
+        # Check that sox was called with volume parameter
+        calls = mock_subprocess.call_args_list[0]
+        args = calls[0][0] if calls[0] else calls[1]['args']
+        self.assertIn('sox', args)
+        self.assertIn('vol', args)
+        self.assertIn('1.5', args)
 
 
 if __name__ == '__main__':

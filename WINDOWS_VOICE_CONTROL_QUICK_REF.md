@@ -36,6 +36,9 @@ cp windows_voice_control.env.example .env
 # Edit your USB device
 echo "USB_AUDIO_DEVICE=hw:1,0" >> .env
 
+# Enable clearer voice for Windows (recommended)
+echo "USE_DIRECT_PIPER=true" >> .env
+
 # Load environment
 source .env
 ```
@@ -47,6 +50,18 @@ python3 windows_voice_control.py "Open Notepad"
 ```
 
 ## Common Commands
+
+### Voice Clarity (Recommended Setup)
+For best results with Windows Voice Assistant, use the clearer kathleen-high voice:
+```bash
+# In .env file:
+USE_DIRECT_PIPER=true
+PIPER_VOICE_MODEL=en_US-kathleen-high
+PIPER_LENGTH_SCALE=1.1  # 10% slower for better recognition
+PIPER_VOLUME_BOOST=1.0  # Increase to 1.2 or 1.5 if needed
+```
+
+This provides clearer speech than the default GLaDOS voice, reducing Windows Voice Assistant misunderstandings.
 
 ### Application Control
 ```bash
@@ -122,6 +137,9 @@ amixer -c 1 set PCM 100%
 1. Ensure Windows Voice Assistant is enabled and listening
 2. Re-train Voice Access with actual TTS audio
 3. Check volume levels on both sides
+4. **Use clearer voice**: Set `USE_DIRECT_PIPER=true` for kathleen-high voice
+5. **Slow down speech**: Increase `PIPER_LENGTH_SCALE` to 1.2 or 1.3
+6. **Boost volume**: Set `PIPER_VOLUME_BOOST=1.5` (requires sox or ffmpeg)
 
 ## Integration with Home Assistant
 
@@ -180,6 +198,10 @@ chmod +x batch_commands.sh
 | `TTS_URL` | `http://localhost:10200` | Piper TTS service URL |
 | `USE_PULSEAUDIO` | `false` | Use PulseAudio instead of ALSA |
 | `PULSEAUDIO_SINK` | - | PulseAudio sink name |
+| `USE_DIRECT_PIPER` | `false` | Use direct Piper for clearer voice |
+| `PIPER_VOICE_MODEL` | `en_US-kathleen-high` | Voice model (clearer than GLaDOS) |
+| `PIPER_LENGTH_SCALE` | `1.1` | Speech speed (higher = slower/clearer) |
+| `PIPER_VOLUME_BOOST` | `1.0` | Volume multiplier for better recognition |
 
 ## Notes
 
@@ -187,6 +209,9 @@ chmod +x batch_commands.sh
 - **Windows must be listening**: Voice Assistant should be active
 - **Audio quality matters**: Clear audio improves recognition
 - **Limited to Voice Assistant commands**: Can't use custom commands
+- **Voice Clarity**: kathleen-high voice (with `USE_DIRECT_PIPER=true`) provides clearer speech than GLaDOS for Windows Voice Assistant
+- **Speech Speed**: `PIPER_LENGTH_SCALE=1.1` slows speech by 10% for better recognition
+- **Volume Adjustment**: `PIPER_VOLUME_BOOST` requires sox or ffmpeg to be installed
 
 For more advanced control (precise clicks, complex automation), use the Computer Control Agent directly on Windows instead. See [COMPUTER_CONTROL_AGENT.md](COMPUTER_CONTROL_AGENT.md).
 
