@@ -23,11 +23,12 @@ logger = logging.getLogger('ha_integration')
 # Flask app for webhook integration
 app = Flask(__name__)
 
-# Create agent instance
-agent = ComputerControlAgent()
-
 # Configuration
 HA_WEBHOOK_SECRET = os.getenv('HA_WEBHOOK_SECRET', 'change-me-secret')
+USE_WINDOWS_VOICE = os.getenv('USE_WINDOWS_VOICE', 'false').lower() == 'true'
+
+# Create agent instance with Windows Voice mode if configured
+agent = ComputerControlAgent(use_windows_voice=USE_WINDOWS_VOICE)
 
 
 @app.route('/healthz', methods=['GET'])
