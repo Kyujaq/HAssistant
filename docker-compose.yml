@@ -200,6 +200,7 @@ services:
       context: ./vision-gateway
       dockerfile: Dockerfile
     container_name: vision-gateway
+    privileged: true  # Required for V4L2 device access
     environment:
       # HA push
       - HA_BASE_URL=http://homeassistant:8123
@@ -207,8 +208,11 @@ services:
       # VL endpoint (1070 / Ollama-vision)
       - OLLAMA_VISION_BASE=http://ollama-vision:11434
       - OLLAMA_VISION_MODEL=qwen2.5vl:7b
-      # Disabled direct HDMI capture - will consume from Frigate's high-quality stream instead
-      - HDMI_ENABLED=false
+      # Direct HDMI capture from UGREEN dongle
+      - HDMI_ENABLED=true
+      - HDMI_DEVICE=/dev/video2
+      - HDMI_FPS=20
+      - HDMI_RESIZE_LONG=2560  # Full native resolution, no downscaling
       # Motion & debounce
       - MOTION_THRESHOLD=0.015
       - COOLDOWN_SECONDS=8
@@ -218,11 +222,13 @@ services:
       - CONTEXT_ZONES_ENABLED=true
     volumes:
       - ./vision-gateway/cache:/app/cache
+      - ./vision-gateway/app/assets:/app/assets:ro   # <-- host ./assets → container /app/assets, read-only
+    devices:
+      - /dev/video2:/dev/video2  # UGREEN HDMI capture dongle
     ports:
       - "8088:8088"  # Debug UI at http://localhost:8088/debug
     depends_on:
       - homeassistant
-      - frigate
     restart: unless-stopped
     networks:
       - ha_network
@@ -253,6 +259,10 @@ services:
 
     ports:
       - "5000:5000"     # Frigate UI/API
+      - "8554:8554"     # RTSP
+      - "8555:8555/tcp" # WebRTC
+      - "8555:8555/udp" # WebRTC
+      - "1984:1984"     # go2rtc API
     restart: unless-stopped
     networks:
       - ha_network

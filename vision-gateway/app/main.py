@@ -7,6 +7,8 @@ import numpy as np
 import cv2
 from skimage.metrics import structural_similarity as ssim
 from paddleocr import PaddleOCR
+from fastapi.responses import HTMLResponse
+from collections import deque
 
 HA_BASE = os.getenv("HA_BASE_URL", "")
 HA_TOKEN = os.getenv("HA_TOKEN", "")
@@ -35,7 +37,7 @@ app = FastAPI(title="Vision Gateway")
 
 # ---- State for button tracking ----
 class ROITracker:
-    def __init__(self, frame: np.ndarray, bbox: Tuple[int,int,int,int]):
+    def __init__(self, frame: np.ndarray, bbox: Tuple[int,int,int,int], icon_edges: np.ndarray | None = None):
         x,y,w,h = bbox
         self.bbox = [x,y,w,h]
         self.tracker = cv2.legacy.TrackerCSRT_create()
@@ -43,6 +45,25 @@ class ROITracker:
         crop = frame[y:y+h, x:x+w]
         self.baseline = self._features(crop)
         self.init_time = time.time()  # Track when tracker was created
+
+        # Icon template edges (optional) and baseline score
+        self.icon_edges = icon_edges
+        self.base_icon_score = self._icon_score(self.baseline["gray"]) if icon_edges is not None else None
+
+        # Short history to tolerate choppy/low-bw streams
+        self._ssim_hist = deque(maxlen=3)
+        self._icon_hist = deque(maxlen=3)
+
+        # --- background box: slightly larger area around the ROI (for global-change suppression)
+        H, W = frame.shape[:2]
+        x,y,w,h = self.bbox
+        scale = 1.8
+        bg_w = int(w*scale); bg_h = int(h*scale)
+        bg_x = max(0, x - (bg_w - w)//2); bg_y = max(0, y - (bg_h - h)//2)
+        bg_w = min(W - bg_x, bg_w); bg_h = min(H - bg_y, bg_h)
+        self.bg_box = [bg_x, bg_y, bg_w, bg_h]
+        bg0 = frame[bg_y:bg_y+bg_h, bg_x:bg_x+bg_w]
+        self.bg_gray0 = cv2.cvtColor(bg0, cv2.COLOR_BGR2GRAY)
 
     def _features(self, crop):
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
@@ -55,6 +76,19 @@ class ROITracker:
         contrast = float(gray.std())
         return {"mean_hsv": mean_hsv, "edge": edge_energy, "contrast": contrast, "gray": gray}
 
+    def _icon_score(self, gray_roi: np.ndarray) -> float:
+        if self.icon_edges is None:
+            return 1.0
+        roi_edges = cv2.Canny(gray_roi, 50, 150)
+        th0, tw0 = self.icon_edges.shape[:2]
+        gh, gw = roi_edges.shape[:2]
+        if tw0 == 0 or th0 == 0 or gw == 0 or gh == 0:
+            return 0.0
+        s = min(1.2, max(0.5, min(gw/float(tw0), gh/float(th0))))
+        tmpl = cv2.resize(self.icon_edges, (max(8,int(tw0*s)), max(8,int(th0*s))), interpolation=cv2.INTER_AREA)
+        res = cv2.matchTemplate(roi_edges, tmpl, cv2.TM_CCOEFF_NORMED)
+        return float(res.max()) if res.size else 0.0
+
     def update_and_check(self, frame) -> Dict[str,Any]:
         ok, box = self.tracker.update(frame)
         if not ok:
@@ -62,25 +96,145 @@ class ROITracker:
         x,y,w,h = [int(v) for v in box]
         crop = frame[y:y+h, x:x+w]
         f = self._features(crop)
-        # SSIM with baseline
-        s = ssim(self.baseline["gray"], f["gray"], data_range=255)
+
+        # SSIM vs baseline (resize-safe)
+        gray0 = cv2.resize(self.baseline["gray"], (f["gray"].shape[1], f["gray"].shape[0]))
+        s = ssim(gray0, f["gray"], data_range=255)
+
         dv = float((f["mean_hsv"][2] - self.baseline["mean_hsv"][2]) / max(1.0, self.baseline["mean_hsv"][2]))
         dcontrast = float((f["contrast"] - self.baseline["contrast"]) / max(1.0, self.baseline["contrast"]))
         dedge = float((f["edge"] - self.baseline["edge"]) / max(1.0, self.baseline["edge"]))
 
+        icon_score = self._icon_score(f["gray"]) if self.icon_edges is not None else None
+        icon_drop = None
+        if self.base_icon_score is not None and icon_score is not None:
+            icon_drop = float(self.base_icon_score - icon_score)
+
+        # Background SSIM to detect global scene changes (minimize/open)
+        bg_x, bg_y, bg_w, bg_h = self.bg_box
+        bg_cur = frame[bg_y:bg_y+bg_h, bg_x:bg_x+bg_w]
+        bg_gray = cv2.cvtColor(bg_cur, cv2.COLOR_BGR2GRAY)
+        bg0_resized = cv2.resize(self.bg_gray0, (bg_gray.shape[1], bg_gray.shape[0]))
+        s_bg = ssim(bg0_resized, bg_gray, data_range=255)
+
         now = time.time()
+        if (now - self.init_time) < 0.6:
+            # Warmup period: ignore presses briefly
+            return {
+                "ok": True, "pressed": False, "bbox":[x,y,w,h],
+                "ssim":s, "ssim_bg": s_bg, "dv":dv, "icon":icon_score, "warmup": True
+            }
 
-        # Warmup period: ignore presses for first 1 second after tracker init
-        if (now - self.init_time) < 1.0:
-            return {"ok": True, "pressed": False, "bbox":[x,y,w,h], "ssim":s, "dv":dv, "warmup": True}
+        # --- Record short history (3 frames) ---
+        self._ssim_hist.append(s)
+        if icon_score is not None:
+            self._icon_hist.append(icon_score)
 
-        # Detect press: button darkening (stricter thresholds)
-        # Use AND logic - multiple metrics must change for more reliability
-        pressed = (s < 0.55) and (dv < -0.15 or dcontrast < -0.25)
+        # Reject obvious minimize: huge global darkening
+        if dv < -0.50:
+            return {
+                "ok": True, "pressed": False, "bbox":[x,y,w,h],
+                "ssim":s, "ssim_bg": s_bg, "dv":dv, "icon":icon_score, "minimized": True
+            }
 
-        return {"ok": True, "pressed": pressed, "bbox":[x,y,w,h], "ssim":s, "dv":dv, "dcontrast":dcontrast, "dedge":dedge}
+        # --- Press heuristics ---
+        # A) Icon score drops noticeably or under a floor (sensitive to tiny glyph changes)
+        pressed_by_icon = False
+        if icon_score is not None:
+            pressed_by_icon = (icon_score < 0.58) or (icon_drop is not None and icon_drop > 0.10)
+
+        # B) SSIM indicates small, consistent ROI change (does not require darkening)
+        pressed_by_ssim = (s < 0.88) and (abs(dv) > 0.03 or dcontrast < -0.08)
+
+        # C) Vote: 2-of-3 frames look pressed (icon or SSIM)
+        votes = 0
+        votes += sum(1 for v in list(self._icon_hist) if v < 0.58) if self._icon_hist else 0
+        votes += sum(1 for v in list(self._ssim_hist) if v < 0.88)
+        pressed_by_vote = (votes >= 2)
+
+        # If background changed a lot too, treat as global change (open/minimize), not a press
+        global_change = (s_bg < 0.85)
+
+        pressed = (not global_change) and bool(pressed_by_icon or pressed_by_ssim or pressed_by_vote)
+
+        return {
+            "ok": True,
+            "pressed": pressed,
+            "bbox":[x,y,w,h],
+            "ssim": s,
+            "ssim_bg": s_bg,
+            "dv": dv,
+            "dcontrast": dcontrast,
+            "dedge": dedge,
+            "icon": icon_score,
+            "icon_drop": icon_drop,
+            "global_change": global_change,
+        }
 
 _trackers: Dict[str, ROITracker] = {}  # key: source -> tracker
+
+# ---- icon templates (generic) ----
+ICON_PATHS = {
+    "send": "/app/assets/send.png",
+    "accept": "/app/assets/accept.png",
+    # "tentative": "/app/assets/tentative.png",
+    # "decline": "/app/assets/decline.png",
+    # "cancel": "/app/assets/cancel.png",
+}
+ICON_EDGES = {}
+
+def _load_icon_edges():
+    ICON_EDGES.clear()
+    for k, p in ICON_PATHS.items():
+        if not os.path.exists(p):  # skip missing files silently
+            continue
+        img = cv2.imread(p, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            continue
+        ICON_EDGES[k] = cv2.Canny(img, 50, 150)
+    print(f"[icons] loaded: {list(ICON_EDGES.keys())}", flush=True)
+
+def detect_icons(slice_bgr, targets=("send","tentative"),
+                 scales=(0.5, 0.6, 0.7, 0.85, 1.0, 1.15), thr_map=None):
+    if not ICON_EDGES:
+        _load_icon_edges()
+    if thr_map is None:
+        thr_map = {"send":0.55, "tentative":0.60}
+    print("[icons] detect_icons start", flush=True)
+
+    gray = cv2.cvtColor(slice_bgr, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    hits = []
+    for kind in targets:
+        tmpl = ICON_EDGES.get(kind)
+        if tmpl is None:
+            if kind == "send":
+                print("[icons] 'send' template not loaded; skipping", flush=True)
+            continue
+        th0, tw0 = tmpl.shape[:2]
+        thr = thr_map.get(kind, 0.6)
+        for s in scales:
+            th = max(8, int(th0*s)); tw = max(8, int(tw0*s))
+            tmpl_s = cv2.resize(tmpl, (tw, th), interpolation=cv2.INTER_AREA)
+            res = cv2.matchTemplate(edges, tmpl_s, cv2.TM_CCOEFF_NORMED)
+
+            if kind == "send":
+                try:
+                    m = float(res.max())
+                except Exception:
+                    m = -1.0
+                print(f"[icons] send scale={s:.2f} max={m:.3f}", flush=True)
+
+            loc = np.where(res >= thr)
+            for (y, x) in zip(*loc):
+                score = float(res[y, x])
+                hits.append({"kind":kind, "x":int(x), "y":int(y), "w":int(tw), "h":int(th), "score":score})
+
+    # keep best only
+    if not hits:
+        return []
+    best = max(hits, key=lambda d: d["score"])
+    return [best]
 
 def ha_event(event_type: str, data: Dict[str,Any]):
     if not HA_BASE or not HA_TOKEN:
@@ -216,17 +370,6 @@ def process_frame(source: str, frame: np.ndarray) -> Dict[str,Any]:
     # Smart crops
     crops = smart_crops(frame_ds, boxes)
 
-    # If we see an action word, lock tracker
-    #for b in boxes:
-    #    t = b["text"].lower()
-    #    if re.search(r"\b(accept|decline|send)\b", t):
-    #        # expand a bit and start tracker for this source
-    #        x,y,w,h = b["bbox"]; pad = int(max(w,h)*0.5)
-    #        x,y = max(0,x-pad), max(0,y-pad)
-    #        w,h = min(frame_ds.shape[1]-x, w+2*pad), min(frame_ds.shape[0]-y, h+2*pad)
-    #       _trackers[source] = ROITracker(frame_ds, (x,y,w,h))
-    #        break
-
     # Call VL to interpret (optional but recommended)
     vl = call_qwen_vl(frame_ds, crops)
 
@@ -260,13 +403,11 @@ def poll_tracking(inp: TrackInput):
     source = inp.source
     if source not in _trackers:
         return {"tracking": False}
-    # For poll mode you must POST frames via /ingest_frame; or for HDMI pull use internal loop
     return {"tracking": True}
 
 # ---- Optional: internal HDMI reader loop ----
 def hdmi_loop():
     cap = cv2.VideoCapture(HDMI_DEVICE, cv2.CAP_V4L2)
-    # You can set formats if needed, e.g., cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     if not cap.isOpened():
         print("[hdmi] cannot open device", HDMI_DEVICE, flush=True); return
     delay = 1.0/max(0.1, HDMI_FPS)
@@ -274,16 +415,92 @@ def hdmi_loop():
         ok, frame = cap.read()
         if not ok:
             time.sleep(0.1); continue
+
+        # Downscale and compute left slice (for icon arming)
+        frame_ds = downscale_keep_long(frame, HDMI_RESIZE_LONG)
+        h, w = frame_ds.shape[:2]
+        left_slice = frame_ds[:, :w//2]
+
+        # If not already tracking, try to arm via icon on the left slice (send/tentative)
+        if "hdmi" not in _trackers:
+            hits = detect_icons(left_slice, targets=("send","tentative"))
+            if hits:
+                best = hits[0]
+                x, y, ww, hh = best["x"], best["y"], best["w"], best["h"]
+                padw = int(ww * 1.15); padh = int(hh * 1.35)  # tighter expansion helps
+                x = max(0, x - (padw - ww)//2); y = max(0, y - (padh - hh)//2)
+                ww = min(left_slice.shape[1]-x, padw); hh = min(left_slice.shape[0]-y, padh)
+                _trackers["hdmi"] = ROITracker(frame_ds, (x, y, ww, hh), icon_edges=ICON_EDGES.get(best["kind"]))
+                print(f"[hdmi] 🎯 Icon '{best['kind']}' at ({x},{y},{ww},{hh}); tracking...", flush=True)
+                time.sleep(0.5)
+                # continue to next loop to start press checks
+                continue
+
+        # Run the regular frame processing (OCR + VL) in parallel
         res = process_frame("hdmi", frame)
+
         # If we are tracking a button, do a quick press check on the same frame
         if "hdmi" in _trackers:
-            tr = _trackers["hdmi"].update_and_check(downscale_keep_long(frame, HDMI_RESIZE_LONG))
-            if tr.get("pressed"):
-                ha_event("vision.meeting_action", {
-                    "source":"hdmi","action":"button_press","state":"pressed",
-                    "metrics":{"ssim":tr["ssim"],"dv":tr["dv"],"dcontrast":tr["dcontrast"],"dedge":tr["dedge"]},
-                    "bbox":tr.get("bbox"), "ts": time.time()
-                })
+            tr = _trackers["hdmi"].update_and_check(frame_ds)
+            if not tr.get("ok"):
+                print("[hdmi] Lost button tracking, will rearm...", flush=True)
+                _trackers.pop("hdmi", None)
+                time.sleep(1.0)
+            elif tr.get("pressed"):
+                # Confirm only if background stayed stable (avoid minimize/open)
+                time.sleep(0.20)
+                confirm = _trackers["hdmi"].update_and_check(frame_ds)
+                confirmed = (
+                    (not confirm.get("ok")) or
+                    (confirm.get("ssim", 1.0) < 0.85 and confirm.get("ssim_bg", 1.0) > 0.90) or
+                    (confirm.get("icon") is not None and confirm["icon"] < 0.60 and confirm.get("ssim_bg", 1.0) > 0.90) or
+                    (confirm.get("pressed") is True and confirm.get("ssim_bg", 1.0) > 0.90)
+                )
+
+                print(f"[hdmi press] ssim={tr['ssim']:.2f}->{confirm.get('ssim',-1):.2f} "
+                      f"bg={tr.get('ssim_bg'):.2f}->{confirm.get('ssim_bg',-1):.2f} "
+                      f"dv={tr['dv']:.3f} icon={tr.get('icon')}→{confirm.get('icon')}", flush=True)
+
+                if confirmed:
+                    ha_event("vision.meeting_action", {
+                        "source":"hdmi","action":"button_press","state":"pressed",
+                        "metrics":{
+                            "ssim":confirm.get("ssim"),
+                            "ssim_bg":confirm.get("ssim_bg"),
+                            "dv":confirm.get("dv"),
+                            "dcontrast":confirm.get("dcontrast"),
+                            "dedge":confirm.get("dedge"),
+                            "icon":confirm.get("icon"),
+                            "icon_drop":confirm.get("icon_drop"),
+                        },
+                        "bbox":confirm.get("bbox"), "ts": time.time()
+                    })
+                    print("[hdmi] ✅ Press confirmed", flush=True)
+
+                    # Optional: snapshot context via OCR+VL
+                    ocr_boxes = ocr_with_boxes(frame_ds)
+                    crops = smart_crops(frame_ds, ocr_boxes)
+                    vl_result = call_qwen_vl(frame_ds, crops)
+
+                    result = {
+                        "invite_detected": vl_result.get("invite_detected", False),
+                        "button_pressed": True,
+                        "vl": vl_result,
+                        "anchor_button": {"bbox": confirm.get("bbox"), "keyword": "button", "text": "Tracked Button"},
+                        "detection_mode": "press_triggered"
+                    }
+
+                    recent_detections.insert(0, {
+                        "timestamp": time.time(),
+                        "result": result,
+                        "frame_b64": b64_jpg(frame_ds),
+                        "button_bbox": confirm.get("bbox")
+                    })
+                    recent_detections[:] = recent_detections[:10]
+
+                    # Reset tracker after press
+                    _trackers.pop("hdmi", None)
+                    time.sleep(2.0)
         time.sleep(delay)
 
 @app.get("/healthz")
@@ -336,17 +553,17 @@ def frigate_stream_loop():
     """
     Press-triggered detection loop (ultra CPU efficient)
 
-    Phase 1: Lightweight OCR to find buttons
-    Phase 2: Track button visually (no OCR, just pixel changes)
-    Phase 3: On button press (darkening) → snapshot + full context extraction
-    Phase 4: Vision model only when button is pressed
+    Phase 1: Try cheap icon template matching on the left slice.
+    Phase 2: If a candidate is found, track the region and look for a press.
+    Phase 3: On press → snapshot + context/VL.
+    Phase 4: If no icons, fallback to anchor OCR.
     """
     from . import anchor_detector
 
-    # Share OCR instance with anchor detector to avoid creating multiple instances
+    # Share OCR with the anchor detector
     anchor_detector.set_shared_ocr(ocr)
 
-    # Toggle between modes
+    # Mode toggle
     if OCR_MODE == "full_screen":
         print("[frigate_stream] Using legacy full-screen OCR mode", flush=True)
         return frigate_stream_loop_legacy()
@@ -354,83 +571,77 @@ def frigate_stream_loop():
     print("[frigate_stream] Using press-triggered detection mode", flush=True)
     FRIGATE_API = "http://frigate:5000/api/ugreen_camera/latest.jpg"
 
-    button_tracker = None  # Track button visually
+    button_tracker = None
     tracking_source = "frigate_hdmi"
 
     while True:
         try:
-            # Fetch latest frame from Frigate
-            resp = requests.get(FRIGATE_API, timeout=5)
+            # -------- fetch frame --------
+            resp = requests.get(FRIGATE_API, params={"_": int(time.time()*1000)}, timeout=5)  # cache-bust
             if resp.status_code != 200:
                 print(f"[frigate_stream] Failed to fetch frame: {resp.status_code}", flush=True)
                 time.sleep(5)
                 continue
 
-            # Decode image
             img_array = np.frombuffer(resp.content, np.uint8)
             frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
             if frame is None:
                 time.sleep(5)
                 continue
 
-            # Downscale for faster processing
+            # Downscale for speed
             frame_ds = downscale_keep_long(frame, HDMI_RESIZE_LONG)
 
-            # Crop to left half for button detection (buttons are typically on left)
-            h, w = frame_ds.shape[:2]
-            left_half = frame_ds[:, :w//4]  # Left 50% of screen
-
-            # If we're tracking a button, check for press
+            # -------- if tracking, check for press --------
             if button_tracker is not None:
+                # Skip frames that are basically dark (minimized/switch)
+                if frame_ds.mean() < 30:
+                    print("[frigate_stream] Skipping dark/minimized frame", flush=True)
+                    time.sleep(0.5)
+                    continue
+
                 track_result = button_tracker.update_and_check(frame_ds)
 
                 if not track_result.get("ok"):
-                    # Lost tracking, reset
                     print("[frigate_stream] Lost button tracking, rescanning...", flush=True)
                     button_tracker = None
                     time.sleep(2)
                     continue
 
                 if track_result.get("pressed"):
-                    # ===== PRESS DETECTED! Wait and check if button disappears =====
-                    print(f"[frigate_stream] 👆 Press detected (SSIM={track_result['ssim']:.2f}, dv={track_result['dv']:.2f}), waiting for disappearance...", flush=True)
+                    print(f"[frigate_stream] 👆 Press detected (s={track_result['ssim']:.2f}, bg={track_result.get('ssim_bg'):.2f}, dv={track_result['dv']:.2f}, icon={track_result.get('icon')})", flush=True)
+                    time.sleep(0.20)
+                    confirm = button_tracker.update_and_check(frame_ds)
 
-                    # Wait 0.5s for button to disappear (dialog closes)
-                    time.sleep(0.5)
+                    confirmed = (
+                        (not confirm.get("ok")) or
+                        (confirm.get("ssim", 1.0) < 0.85 and confirm.get("ssim_bg", 1.0) > 0.90) or
+                        (confirm.get("icon") is not None and confirm["icon"] < 0.60 and confirm.get("ssim_bg", 1.0) > 0.90) or
+                        (confirm.get("pressed") is True and confirm.get("ssim_bg", 1.0) > 0.90)
+                    )
 
-                    # Check if button disappeared
-                    disappear_check = button_tracker.update_and_check(frame_ds)
+                    print(f"[press] ssim={track_result['ssim']:.2f}->{confirm.get('ssim',-1):.2f} "
+                          f"bg={track_result.get('ssim_bg',-1):.2f}->{confirm.get('ssim_bg',-1):.2f} "
+                          f"dv={track_result['dv']:.3f} icon={track_result.get('icon')}→{confirm.get('icon')}", flush=True)
 
-                    if not disappear_check.get("ok"):
-                        # ===== BUTTON DISAPPEARED! This is a real press =====
-                        print(f"[frigate_stream] 🔥 BUTTON DISAPPEARED! Triggering Qwen analysis...", flush=True)
-
-                        # Use the last known bbox before disappearance
+                    if confirmed:
+                        print(f"[frigate_stream] ✅ Press confirmed", flush=True)
                         tracked_bbox = track_result["bbox"]
 
-                        # Run OCR and Qwen VL analysis (Qwen extracts everything we need)
                         ocr_boxes = ocr_with_boxes(frame_ds)
                         crops = smart_crops(frame_ds, ocr_boxes)
                         vl_result = call_qwen_vl(frame_ds, crops)
 
-                        # Create button info from tracked bbox
-                        button_info = {
-                            "bbox": tracked_bbox,
-                            "keyword": "button",
-                            "text": "Tracked Button"
-                        }
+                        button_info = {"bbox": tracked_bbox, "keyword": "button", "text": "Tracked Button"}
 
-                        # Push HA event with Qwen's data only
                         ha_event("vision.meeting_action", {
                             "source": tracking_source,
                             "action": "button_press",
                             "button": button_info["keyword"],
                             "vl": vl_result,
-                            "metrics": {"ssim": track_result["ssim"], "dv": track_result["dv"]}
+                            "metrics": {"ssim": track_result["ssim"], "dv": track_result["dv"], "icon": track_result.get("icon"), "ssim_bg":track_result.get("ssim_bg")}
                         })
 
-                        # Store detection
                         result = {
                             "invite_detected": vl_result.get("invite_detected", False),
                             "button_pressed": True,
@@ -439,8 +650,6 @@ def frigate_stream_loop():
                             "detection_mode": "press_triggered"
                         }
 
-                        # Store full-resolution image and coordinates (no scaling)
-                        # Browser will handle display scaling via CSS
                         recent_detections.insert(0, {
                             "timestamp": time.time(),
                             "result": result,
@@ -449,52 +658,64 @@ def frigate_stream_loop():
                         })
                         recent_detections[:] = recent_detections[:10]
 
-                        print(f"[frigate_stream] ✅ Press captured! Qwen detected: {vl_result.get('invite_detected', False)}, title='{vl_result.get('title', '')[:40]}'", flush=True)
-
-                        # Reset tracker after press
                         button_tracker = None
-                        time.sleep(5)  # Cooldown after processing
+                        time.sleep(3)
                     else:
-                        # Button still there - false positive, keep tracking
-                        print(f"[frigate_stream] ⚠️  Button still visible after press - false positive, continuing tracking...", flush=True)
-                        time.sleep(0.1)  # Poll at 10 FPS
+                        print(f"[frigate_stream] ⚠️ Looks like hover/flash or global change; keep tracking...", flush=True)
+                        time.sleep(0.1)
                 else:
-                    # Still tracking, no press yet
-                    time.sleep(0.1)  # Poll at 10 FPS when tracking (fast enough to catch clicks)
-                continue
+                    time.sleep(0.1)
+                continue  # next frame
 
-            # ===== Phase 1: Lightweight scan for buttons (no tracking yet) =====
-            # Scan only left half for better performance
-            ocr_boxes = ocr_with_boxes(left_half)
+            # -------- Phase 1: icon template matching on left slice --------
+            h, w = frame_ds.shape[:2]
+            left_slice = frame_ds[:, :w//2]  # scan 50% (button is within this)
 
+            # --- Phase 1A: icon detection ---
+            icon_hits = detect_icons(left_slice, targets=("send","tentative"))
+            print("[icons] detect_icons called for send/tentative", flush=True)
+
+            if icon_hits:
+                best = icon_hits[0]
+                x, y, ww, hh = best["x"], best["y"], best["w"], best["h"]
+                # tighter expansion to emphasize glyph change
+                padw = int(ww * 1.15); padh = int(hh * 1.35)
+                x = max(0, x - (padw - ww)//2); y = max(0, y - (padh - hh)//2)
+                ww = min(left_slice.shape[1]-x, padw); hh = min(left_slice.shape[0]-y, padh)
+
+                # Start ROI tracker, pass icon edges
+                button_tracker = ROITracker(frame_ds, (x, y, ww, hh), icon_edges=ICON_EDGES.get(best['kind']))
+                print(f"[frigate_stream] 🎯 Icon '{best['kind']}' at ({x},{y},{ww},{hh}); tracking...", flush=True)
+                time.sleep(2)
+                continue  # go into tracking mode
+
+            # -------- Phase 1 fallback: anchor OCR on left slice --------
+            ocr_boxes = ocr_with_boxes(left_slice)
             if not ocr_boxes:
                 time.sleep(5)
                 continue
 
-            buttons = anchor_detector.detect_buttons(left_half, ocr_boxes=ocr_boxes)
+            buttons = anchor_detector.detect_buttons(left_slice, ocr_boxes=ocr_boxes)
 
             if buttons:
-                # Found button! Start tracking it
                 priority_order = ["accept", "decline", "send"]
-                buttons_sorted = sorted(buttons, key=lambda b: priority_order.index(b["keyword"]) if b["keyword"] in priority_order else 999)
+                buttons_sorted = sorted(
+                    buttons,
+                    key=lambda b: priority_order.index(b["keyword"]) if b["keyword"] in priority_order else 999
+                )
                 primary_button = buttons_sorted[0]
+                x, y, bw, bh = primary_button["bbox"]
 
-                print(f"[frigate_stream] 👁️  Found {primary_button['keyword']} button at ({primary_button['bbox'][0]}, {primary_button['bbox'][1]}), starting visual tracking...", flush=True)
-
-                # Initialize tracker on expanded button area (2.5x wider, 3.5x taller for stability)
-                x, y, w, h = primary_button["bbox"]
-                expanded_w = int(w * 2.5)
-                expanded_h = int(h * 3.5)
-                # Keep expanded box within frame bounds
+                expanded_w = int(bw * 1.6)
+                expanded_h = int(bh * 1.8)
                 h_frame, w_frame = frame_ds.shape[:2]
                 expanded_w = min(expanded_w, w_frame - x)
                 expanded_h = min(expanded_h, h_frame - y)
 
                 button_tracker = ROITracker(frame_ds, (x, y, expanded_w, expanded_h))
-
-                time.sleep(2)  # Short wait before checking for press
+                print(f"[frigate_stream] 👁️  Found '{primary_button['keyword']}' via OCR at ({x},{y}), tracking...", flush=True)
+                time.sleep(2)
             else:
-                # No buttons, keep scanning
                 time.sleep(5)
 
         except Exception as e:
@@ -503,6 +724,7 @@ def frigate_stream_loop():
             traceback.print_exc()
             button_tracker = None
             time.sleep(5)
+
 
 @app.get("/debug")
 async def debug_page():
@@ -543,33 +765,19 @@ async def debug_page():
         <div id="detections"></div>
         <script>
             function drawBoundingBoxes(imgElement, buttonBbox) {
-                console.log('drawBoundingBoxes called', {buttonBbox, imgNaturalWidth: imgElement.naturalWidth, imgNaturalHeight: imgElement.naturalHeight});
-
                 const container = imgElement.parentElement;
-
-                // Remove any existing canvas
                 const existingCanvas = container.querySelector('canvas');
                 if (existingCanvas) existingCanvas.remove();
-
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-
-                // Canvas internal size matches image natural size
-                // Coordinates from Python are already in this space
                 canvas.width = imgElement.naturalWidth;
                 canvas.height = imgElement.naturalHeight;
-
-                // CSS size matches the displayed image size
                 canvas.style.width = '100%';
                 canvas.style.height = '100%';
                 canvas.style.position = 'absolute';
                 canvas.style.top = '0';
                 canvas.style.left = '0';
                 canvas.style.pointerEvents = 'none';
-
-                console.log('Canvas created:', {width: canvas.width, height: canvas.height});
-
-                // Draw button bbox (green)
                 if (buttonBbox && buttonBbox.length === 4) {
                     const [x, y, w, h] = buttonBbox;
                     ctx.strokeStyle = '#00ff00';
@@ -579,7 +787,6 @@ async def debug_page():
                     ctx.font = '14px monospace';
                     ctx.fillText('BUTTON', x, Math.max(y - 5, 12));
                 }
-
                 container.appendChild(canvas);
             }
 
@@ -607,7 +814,6 @@ async def debug_page():
                             </div>
                         ` : '';
 
-                        // Add unique ID for debugging
                         const imgId = 'img_' + d.timestamp;
 
                         return `
@@ -617,8 +823,7 @@ async def debug_page():
                                 <div class="image-container" style="position: relative; display: inline-block;">
                                     <img id="${imgId}" src="data:image/jpeg;base64,${d.frame_b64}"
                                          style="display: block; max-width: 100%; height: auto;"
-                                         onload='console.log("Image loaded:", "${imgId}"); drawBoundingBoxes(this, ${JSON.stringify(d.button_bbox)})'
-                                         onerror='console.error("Image failed to load:", "${imgId}")'>
+                                         onload='drawBoundingBoxes(this, ${JSON.stringify(d.button_bbox)})'>
                                 </div>
                                 ${qwenInfo}
                                 <details>
@@ -639,8 +844,6 @@ async def debug_page():
 def get_recent_detections():
     """API endpoint for recent detections"""
     return recent_detections
-
-from fastapi.responses import HTMLResponse
 
 # Start Frigate stream processor
 threading.Thread(target=frigate_stream_loop, daemon=True).start()
