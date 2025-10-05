@@ -7,7 +7,7 @@ Handles Excel-related task automation using CrewAI framework.
 import logging
 from typing import Dict, Any
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
 from crewai import Agent, Task, Crew, Process
 from crew_tools import VoiceCommandTool, VisionVerificationTool
 
@@ -59,7 +59,14 @@ verification_agent = Agent(
 
 class CrewTask(BaseModel):
     """Request model for crew tasks"""
-    goal: str
+    goal: str = Field(..., min_length=1, max_length=500, description="The goal to accomplish")
+
+    @validator('goal')
+    def validate_goal(cls, v):
+        """Validate that goal is meaningful"""
+        if not v or not v.strip():
+            raise ValueError("Goal cannot be empty or whitespace only")
+        return v.strip()
 
 
 @app.get("/")
@@ -68,14 +75,42 @@ async def root():
     return {
         "service": "Crew Orchestrator",
         "version": "1.0.0",
-        "status": "operational"
+        "status": "operational",
+        "endpoints": {
+            "health": "/healthz",
+            "kickoff": "/crew/excel/kickoff"
+        }
     }
 
 
 @app.get("/healthz")
 async def health_check():
     """Health check endpoint"""
-    return {"ok": True, "service": "crew-orchestrator"}
+    try:
+        # Verify tools are initialized
+        if not voice_tool or not vision_tool:
+            return {"ok": False, "service": "crew-orchestrator", "error": "Tools not initialized"}
+        
+        # Verify agents are initialized
+        if not planner or not action_agent or not verification_agent:
+            return {"ok": False, "service": "crew-orchestrator", "error": "Agents not initialized"}
+        
+        return {
+            "ok": True, 
+            "service": "crew-orchestrator",
+            "agents": {
+                "planner": "initialized",
+                "action_agent": "initialized",
+                "verification_agent": "initialized"
+            },
+            "tools": {
+                "voice_command": "initialized",
+                "vision_verification": "initialized"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return {"ok": False, "service": "crew-orchestrator", "error": str(e)}
 
 
 @app.post("/crew/excel/kickoff")
@@ -88,9 +123,16 @@ async def kickoff_excel_task(task: CrewTask) -> Dict[str, Any]:
         
     Returns:
         Task execution result
+        
+    Raises:
+        HTTPException: If task execution fails
     """
     try:
         logger.info(f"Received Excel task with goal: {task.goal}")
+        
+        # Validate that the goal is appropriate for Excel automation
+        if not task.goal:
+            raise HTTPException(status_code=400, detail="Goal cannot be empty")
         
         # Task 1: Create the plan
         planning_task = Task(
@@ -109,7 +151,9 @@ async def kickoff_excel_task(task: CrewTask) -> Dict[str, Any]:
             verbose=2
         )
 
+        logger.info(f"Starting crew execution for goal: {task.goal}")
         result = excel_crew.kickoff()
+        logger.info(f"Crew execution completed successfully")
         
         return {
             "status": "success",
@@ -117,9 +161,12 @@ async def kickoff_excel_task(task: CrewTask) -> Dict[str, Any]:
             "result": str(result)
         }
         
+    except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error processing Excel task: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error processing Excel task: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Task execution failed: {str(e)}")
 
 
 if __name__ == "__main__":
