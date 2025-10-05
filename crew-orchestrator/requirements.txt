@@ -3,3 +3,5 @@ uvicorn[standard]==0.30.6
 pydantic==2.8.2
 crewai==0.28.8
 crewai-tools==0.1.6
+python-dotenv
+requests
