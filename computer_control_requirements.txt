@@ -12,3 +12,6 @@ pytesseract>=0.3.10
 
 # HTTP and utilities
 requests>=2.31.0
+
+# Home Assistant integration (optional)
+flask>=3.0.0
