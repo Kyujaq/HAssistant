@@ -38,6 +38,14 @@ rest_command:
       x-api-key: "d6DkfuU7zPOpcoeAVabiNNPhTH6TcFrZ"
       content-type: "application/json"
 
+  crew_excel_task:
+    url: http://hassistant-crew-orchestrator:8084/crew/excel/kickoff
+    method: POST
+    headers:
+      accept: "application/json"
+      content-type: "application/json"
+    payload: '{"goal": "{{ goal }}"}'
+
 # Letta Bridge Sensors
 sensor:
   - platform: rest
