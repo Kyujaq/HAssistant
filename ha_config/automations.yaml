@@ -32,3 +32,59 @@
         confidence: 0.95
         tier: "medium"
         type: "event"
+
+# Auto-create work calendar events from meeting invite detections
+- id: vision_meeting_to_calendar
+  alias: Vision Gateway - Auto-Create Work Calendar Events
+  description: Automatically create calendar events when meeting invite buttons are pressed
+  trigger:
+    - platform: event
+      event_type: vision.meeting_action
+      event_data:
+        action: button_press
+  condition:
+    - condition: template
+      value_template: "{{ trigger.event.data.vl.invite_detected == true }}"
+    - condition: template
+      value_template: "{{ trigger.event.data.vl.start_iso is defined and trigger.event.data.vl.start_iso != '' }}"
+  action:
+    # Create calendar event
+    - service: calendar.create_event
+      target:
+        entity_id: calendar.work_calendar
+      data:
+        summary: "Work: {{ trigger.event.data.vl.title | default('Meeting') }}"
+        start_date_time: "{{ trigger.event.data.vl.start_iso }}"
+        end_date_time: >
+          {% if trigger.event.data.vl.end_iso is defined and trigger.event.data.vl.end_iso != '' %}
+            {{ trigger.event.data.vl.end_iso }}
+          {% else %}
+            {{ (trigger.event.data.vl.start_iso | as_datetime + timedelta(hours=1)) | as_timestamp | timestamp_custom('%Y-%m-%dT%H:%M:%S%z', true) }}
+          {% endif %}
+        description: >
+          {% set desc_parts = [] %}
+          {% if trigger.event.data.vl.attendees is defined and trigger.event.data.vl.attendees != '' %}
+            {% set _ = desc_parts.append('Attendees: ' ~ trigger.event.data.vl.attendees) %}
+          {% endif %}
+          {% if trigger.event.data.vl.location is defined and trigger.event.data.vl.location != '' %}
+            {% set _ = desc_parts.append('Location: ' ~ trigger.event.data.vl.location) %}
+          {% endif %}
+          {% if trigger.event.data.vl.app is defined and trigger.event.data.vl.app != '' %}
+            {% set _ = desc_parts.append('App: ' ~ trigger.event.data.vl.app) %}
+          {% endif %}
+          {{ desc_parts | join('\n\n') }}
+
+    # Log to Letta memory
+    - service: rest_command.letta_add_memory
+      data:
+        title: "Calendar Event Created: {{ trigger.event.data.vl.title | default('Meeting') }}"
+        content: >
+          Auto-created work calendar event from meeting invite detection.
+          Title: {{ trigger.event.data.vl.title | default('Meeting') }}
+          Start: {{ trigger.event.data.vl.start_iso }}
+          App: {{ trigger.event.data.vl.app | default('Unknown') }}
+        tags: '["calendar", "meeting", "automation", "vision_gateway"]'
+        source: '["vision_gateway"]'
+        confidence: 0.9
+        tier: "short"
+        type: "event"

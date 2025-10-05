@@ -343,11 +343,9 @@ def frigate_stream_loop():
     Phase 4: Vision model only when button is pressed
     """
     from . import anchor_detector
-    from . import context_extractor
 
-    # Share OCR instance with sub-modules to avoid creating multiple instances
+    # Share OCR instance with anchor detector to avoid creating multiple instances
     anchor_detector.set_shared_ocr(ocr)
-    context_extractor.set_shared_ocr(ocr)
 
     # Toggle between modes
     if OCR_MODE == "full_screen":
@@ -396,80 +394,53 @@ def frigate_stream_loop():
                     continue
 
                 if track_result.get("pressed"):
-                    # ===== BUTTON PRESSED! Capture snapshot and extract context =====
-                    print(f"[frigate_stream] 🔥 BUTTON PRESS DETECTED! Extracting context...", flush=True)
+                    # ===== BUTTON PRESSED! Capture snapshot and run Qwen analysis =====
+                    print(f"[frigate_stream] 🔥 BUTTON PRESS DETECTED! Running Qwen analysis...", flush=True)
 
-                    # Now do the expensive operations
+                    # Use the tracker's bbox (already knows where the button is)
+                    tracked_bbox = track_result["bbox"]
+
+                    # Run OCR and Qwen VL analysis (Qwen extracts everything we need)
                     ocr_boxes = ocr_with_boxes(frame_ds)
-                    buttons = anchor_detector.detect_buttons(frame_ds, ocr_boxes=ocr_boxes)
+                    crops = smart_crops(frame_ds, ocr_boxes)
+                    vl_result = call_qwen_vl(frame_ds, crops)
 
-                    if buttons:
-                        priority_order = ["accept", "decline", "send"]
-                        buttons_sorted = sorted(buttons, key=lambda b: priority_order.index(b["keyword"]) if b["keyword"] in priority_order else 999)
-                        primary_button = buttons_sorted[0]
+                    # Create button info from tracked bbox
+                    button_info = {
+                        "bbox": tracked_bbox,
+                        "keyword": "button",
+                        "text": "Tracked Button"
+                    }
 
-                        # Extract context around pressed button
-                        context = context_extractor.extract_meeting_context(frame_ds, primary_button["bbox"])
+                    # Push HA event with Qwen's data only
+                    ha_event("vision.meeting_action", {
+                        "source": tracking_source,
+                        "action": "button_press",
+                        "button": button_info["keyword"],
+                        "vl": vl_result,
+                        "metrics": {"ssim": track_result["ssim"], "dv": track_result["dv"]}
+                    })
 
-                        # Vision model
-                        crops = smart_crops(frame_ds, ocr_boxes)
-                        vl_result = call_qwen_vl(frame_ds, crops)
+                    # Store detection
+                    result = {
+                        "invite_detected": vl_result.get("invite_detected", False),
+                        "button_pressed": True,
+                        "vl": vl_result,
+                        "anchor_button": button_info,
+                        "detection_mode": "press_triggered"
+                    }
 
-                        # Push HA event
-                        ha_event("vision.meeting_action", {
-                            "source": tracking_source,
-                            "action": "button_press",
-                            "button": primary_button["keyword"],
-                            "context": {
-                                "title": context.get("title_text", ""),
-                                "start_time": context.get("time_start_text", ""),
-                                "end_time": context.get("time_end_text", ""),
-                                "location": context.get("location_text", ""),
-                            },
-                            "vl": vl_result,
-                            "metrics": {"ssim": track_result["ssim"], "dv": track_result["dv"]}
-                        })
+                    # Store full-resolution image and coordinates (no scaling)
+                    # Browser will handle display scaling via CSS
+                    recent_detections.insert(0, {
+                        "timestamp": time.time(),
+                        "result": result,
+                        "frame_b64": b64_jpg(frame_ds),
+                        "button_bbox": tracked_bbox
+                    })
+                    recent_detections[:] = recent_detections[:10]
 
-                        # Store detection
-                        result = {
-                            "invite_detected": True,
-                            "button_pressed": True,
-                            "vl": vl_result,
-                            "anchor_button": primary_button,
-                            "context": context,
-                            "detection_mode": "press_triggered"
-                        }
-
-                        # Scale coordinates to match 640x360 display size
-                        h_ds, w_ds = frame_ds.shape[:2]
-                        scale_x, scale_y = 640 / w_ds, 360 / h_ds
-
-                        scaled_bbox = [
-                            int(primary_button["bbox"][0] * scale_x),
-                            int(primary_button["bbox"][1] * scale_y),
-                            int(primary_button["bbox"][2] * scale_x),
-                            int(primary_button["bbox"][3] * scale_y)
-                        ]
-
-                        scaled_zones = {}
-                        for zone_name, zone_bbox in context.get("zones", {}).items():
-                            scaled_zones[zone_name] = [
-                                int(zone_bbox[0] * scale_x),
-                                int(zone_bbox[1] * scale_y),
-                                int(zone_bbox[2] * scale_x),
-                                int(zone_bbox[3] * scale_y)
-                            ]
-
-                        recent_detections.insert(0, {
-                            "timestamp": time.time(),
-                            "result": result,
-                            "frame_b64": b64_jpg(cv2.resize(frame_ds, (640, 360))),
-                            "button_bbox": scaled_bbox,
-                            "context_zones": scaled_zones
-                        })
-                        recent_detections[:] = recent_detections[:10]
-
-                        print(f"[frigate_stream] ✅ Press captured! title='{context.get('title_text', '')[:40]}' loc='{context.get('location_text', '')[:20]}'", flush=True)
+                    print(f"[frigate_stream] ✅ Press captured! Qwen detected: {vl_result.get('invite_detected', False)}, title='{vl_result.get('title', '')[:40]}'", flush=True)
 
                     # Reset tracker after press
                     button_tracker = None
@@ -547,17 +518,12 @@ async def debug_page():
             <p>Monitoring Frigate HDMI stream for meeting invites...</p>
         </div>
         <div class="legend">
-            <div class="legend-item"><span class="legend-box" style="background: #00ff00;"></span>Button Detection</div>
-            <div class="legend-item"><span class="legend-box" style="background: #ff0000;"></span>Title Zone</div>
-            <div class="legend-item"><span class="legend-box" style="background: #0000ff;"></span>Start Time Zone</div>
-            <div class="legend-item"><span class="legend-box" style="background: #ff00ff;"></span>End Time Zone</div>
-            <div class="legend-item"><span class="legend-box" style="background: #00ffff;"></span>Location Zone</div>
-            <div class="legend-item"><span class="legend-box" style="background: #ffff00;"></span>Attendees Zone</div>
+            <div class="legend-item"><span class="legend-box" style="background: #00ff00;"></span>Button Detection (Press Trigger)</div>
         </div>
         <div id="detections"></div>
         <script>
-            function drawBoundingBoxes(imgElement, buttonBbox, contextZones) {
-                console.log('drawBoundingBoxes called', {buttonBbox, contextZones, imgNaturalWidth: imgElement.naturalWidth, imgNaturalHeight: imgElement.naturalHeight});
+            function drawBoundingBoxes(imgElement, buttonBbox) {
+                console.log('drawBoundingBoxes called', {buttonBbox, imgNaturalWidth: imgElement.naturalWidth, imgNaturalHeight: imgElement.naturalHeight});
 
                 const container = imgElement.parentElement;
 
@@ -568,20 +534,18 @@ async def debug_page():
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
 
-                // Match canvas to image's DISPLAYED size
-                const displayWidth = imgElement.offsetWidth || imgElement.width;
-                const displayHeight = imgElement.offsetHeight || imgElement.height;
+                // Canvas internal size matches image natural size
+                // Coordinates from Python are already in this space
+                canvas.width = imgElement.naturalWidth;
+                canvas.height = imgElement.naturalHeight;
 
-                canvas.width = displayWidth;
-                canvas.height = displayHeight;
+                // CSS size matches the displayed image size
+                canvas.style.width = '100%';
+                canvas.style.height = '100%';
                 canvas.style.position = 'absolute';
                 canvas.style.top = '0';
                 canvas.style.left = '0';
                 canvas.style.pointerEvents = 'none';
-
-                // Scale coordinates from natural size (640x360) to displayed size
-                const scaleX = displayWidth / imgElement.naturalWidth;
-                const scaleY = displayHeight / imgElement.naturalHeight;
 
                 console.log('Canvas created:', {width: canvas.width, height: canvas.height});
 
@@ -590,68 +554,10 @@ async def debug_page():
                     const [x, y, w, h] = buttonBbox;
                     ctx.strokeStyle = '#00ff00';
                     ctx.lineWidth = 4;
-                    ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
+                    ctx.strokeRect(x, y, w, h);
                     ctx.fillStyle = '#00ff00';
                     ctx.font = '14px monospace';
-                    ctx.fillText('BUTTON', x * scaleX, Math.max(y * scaleY - 5, 12));
-                }
-
-                // Draw context zones (with scaling)
-                if (contextZones) {
-                    // Title zone (red)
-                    if (contextZones.title && contextZones.title.length === 4) {
-                        const [x, y, w, h] = contextZones.title;
-                        ctx.strokeStyle = '#ff0000';
-                        ctx.lineWidth = 2;
-                        ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
-                        ctx.fillStyle = '#ff0000';
-                        ctx.font = '14px monospace';
-                        ctx.fillText('TITLE', x * scaleX, Math.max(y * scaleY - 5, 12));
-                    }
-
-                    // Start time zone (blue)
-                    if (contextZones.time_start && contextZones.time_start.length === 4) {
-                        const [x, y, w, h] = contextZones.time_start;
-                        ctx.strokeStyle = '#0000ff';
-                        ctx.lineWidth = 2;
-                        ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
-                        ctx.fillStyle = '#0000ff';
-                        ctx.font = '14px monospace';
-                        ctx.fillText('START', x * scaleX, Math.max(y * scaleY - 5, 12));
-                    }
-
-                    // End time zone (magenta)
-                    if (contextZones.time_end && contextZones.time_end.length === 4) {
-                        const [x, y, w, h] = contextZones.time_end;
-                        ctx.strokeStyle = '#ff00ff';
-                        ctx.lineWidth = 2;
-                        ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
-                        ctx.fillStyle = '#ff00ff';
-                        ctx.font = '14px monospace';
-                        ctx.fillText('END', x * scaleX, Math.max(y * scaleY - 5, 12));
-                    }
-
-                    // Location zone (cyan)
-                    if (contextZones.location && contextZones.location.length === 4) {
-                        const [x, y, w, h] = contextZones.location;
-                        ctx.strokeStyle = '#00ffff';
-                        ctx.lineWidth = 2;
-                        ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
-                        ctx.fillStyle = '#00ffff';
-                        ctx.font = '14px monospace';
-                        ctx.fillText('LOCATION', x * scaleX, Math.max(y * scaleY - 5, 12));
-                    }
-
-                    // Attendees zone (yellow)
-                    if (contextZones.attendees && contextZones.attendees.length === 4) {
-                        const [x, y, w, h] = contextZones.attendees;
-                        ctx.strokeStyle = '#ffff00';
-                        ctx.lineWidth = 2;
-                        ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
-                        ctx.fillStyle = '#ffff00';
-                        ctx.font = '14px monospace';
-                        ctx.fillText('ATTENDEES', x * scaleX, Math.max(y * scaleY - 5, 12));
-                    }
+                    ctx.fillText('BUTTON', x, Math.max(y - 5, 12));
                 }
 
                 container.appendChild(canvas);
@@ -667,36 +573,36 @@ async def debug_page():
                     }
                     div.innerHTML = data.map(d => {
                         const buttonInfo = d.button_bbox ? `<p class="button-info">Button: ${JSON.stringify(d.result.anchor_button || {})}</p>` : '';
-                        const context = d.result.context || {};
-                        const contextInfo = context.title_text || context.time_start_text || context.time_end_text || context.location_text || context.attendees_text ? `
+                        const vl = d.result.vl || {};
+                        const qwenInfo = vl.invite_detected ? `
                             <div class="context-info">
-                                <h3>Extracted Context:</h3>
-                                ${context.title_text ? '<div class="context-text"><strong>Title:</strong> ' + context.title_text + '</div>' : ''}
-                                ${context.time_start_text ? '<div class="context-text"><strong>Start Time:</strong> ' + context.time_start_text + '</div>' : ''}
-                                ${context.time_end_text ? '<div class="context-text"><strong>End Time:</strong> ' + context.time_end_text + '</div>' : ''}
-                                ${context.location_text ? '<div class="context-text"><strong>Location:</strong> ' + context.location_text + '</div>' : ''}
-                                ${context.attendees_text ? '<div class="context-text"><strong>Attendees:</strong> ' + context.attendees_text + '</div>' : ''}
+                                <h3>Qwen VL Extraction:</h3>
+                                ${vl.app ? '<div class="context-text"><strong>App:</strong> ' + vl.app + '</div>' : ''}
+                                ${vl.title ? '<div class="context-text"><strong>Title:</strong> ' + vl.title + '</div>' : ''}
+                                ${vl.start_iso ? '<div class="context-text"><strong>Start:</strong> ' + vl.start_iso + '</div>' : ''}
+                                ${vl.end_iso ? '<div class="context-text"><strong>End:</strong> ' + vl.end_iso + '</div>' : ''}
+                                ${vl.location ? '<div class="context-text"><strong>Location:</strong> ' + vl.location + '</div>' : ''}
+                                ${vl.attendees ? '<div class="context-text"><strong>Attendees:</strong> ' + vl.attendees + '</div>' : ''}
+                                ${vl.action_state ? '<div class="context-text"><strong>State:</strong> ' + vl.action_state + '</div>' : ''}
                             </div>
                         ` : '';
 
                         // Add unique ID for debugging
                         const imgId = 'img_' + d.timestamp;
-                        const debugInfo = `Button: ${JSON.stringify(d.button_bbox)}, Has zones: ${!!d.context_zones}`;
 
                         return `
                             <div class="detection">
                                 <div class="timestamp">${new Date(d.timestamp * 1000).toLocaleString()}</div>
                                 ${buttonInfo}
-                                <div style="color: yellow; font-size: 10px;">DEBUG: ${debugInfo}</div>
-                                <div class="image-container" style="position: relative;">
+                                <div class="image-container" style="position: relative; display: inline-block;">
                                     <img id="${imgId}" src="data:image/jpeg;base64,${d.frame_b64}"
-                                         style="display: block;"
-                                         onload='console.log("Image loaded:", "${imgId}"); drawBoundingBoxes(this, ${JSON.stringify(d.button_bbox)}, ${JSON.stringify(d.context_zones)})'
+                                         style="display: block; max-width: 100%; height: auto;"
+                                         onload='console.log("Image loaded:", "${imgId}"); drawBoundingBoxes(this, ${JSON.stringify(d.button_bbox)})'
                                          onerror='console.error("Image failed to load:", "${imgId}")'>
                                 </div>
-                                ${contextInfo}
+                                ${qwenInfo}
                                 <details>
-                                    <summary>Full Detection Data</summary>
+                                    <summary>Full Detection Data (Qwen VL)</summary>
                                     <pre>${JSON.stringify(d.result, null, 2)}</pre>
                                 </details>
                             </div>
