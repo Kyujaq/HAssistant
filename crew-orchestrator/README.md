@@ -120,15 +120,31 @@ curl -X POST http://localhost:8084/crew/excel/kickoff \
 
 ## Dependencies
 
-The service relies on two external services:
+The service is designed to integrate with external services:
 
-1. **Windows Voice Control Service** (`windows_voice_control.py`)
-   - Handles voice command execution
-   - Uses TTS to control Windows via audio
+1. **Windows Voice Control** (`windows_voice_control.py`)
+   - Standalone Python script for voice command execution
+   - Uses TTS (Piper) to send audio commands via USB audio cable
+   - Currently called as a standalone script, not as a service endpoint
+   - Located in the root directory of the project
 
-2. **Vision Gateway Service** 
-   - Provides screen state verification
-   - Uses vision models to validate UI states
+2. **Vision Gateway Service** (`vision-gateway`)
+   - Tracks UI elements via HDMI capture
+   - Provides `/ingest_frame` and `/poll_tracking` endpoints
+   - Designed for button/element state tracking rather than general Q&A
+   - Note: The current placeholder implementation assumes a `/query` endpoint which doesn't exist yet
+
+### Integration Notes
+
+**Current Implementation Status:**
+- Both tool integrations are **placeholders** waiting for proper implementation
+- The VoiceCommandTool needs to invoke `windows_voice_control.py` script directly or wrap it in a service
+- The VisionVerificationTool needs adaptation to use vision-gateway's tracking capabilities rather than Q&A
+
+**Recommended Implementation Path:**
+1. Create a simple FastAPI wrapper around `windows_voice_control.py` with a `/speak` endpoint
+2. Extend vision-gateway with a Q&A endpoint using the OLLAMA vision model already configured
+3. Update the tool implementations to use these endpoints
 
 ## Development
 
