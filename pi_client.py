@@ -8,16 +8,12 @@ import os
 import sys
 import time
 import logging
-import asyncio
 import subprocess
-from pathlib import Path
 from typing import Optional
 import uuid
-from datetime import datetime, timedelta
 
 import numpy as np
 import pvporcupine
-import sounddevice as sd
 import requests
 import pyaudio
 import wave

@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Any, AsyncIterator
 from enum import Enum
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
