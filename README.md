@@ -7,6 +7,7 @@ A complete voice assistant implementation using Home Assistant's native features
 - **Local LLM Processing**: Ollama with GPU support (GTX 1080 Ti + GTX 1070)
 - **Voice Interaction**: Wyoming Whisper (STT) + Piper (TTS) with GLaDOS voice
 - **Raspberry Pi Client**: Wake word detection and voice processing
+- **PC Control Agent**: Qwen-based voice control for PC operations (NEW!)
 - **Home Assistant Integration**: Native Assist API integration
 - **Memory System**: Letta Bridge with PostgreSQL + pgvector for contextual memory
 - **Dual GPU Support**: Automatic GPU allocation for optimal performance
@@ -230,6 +231,7 @@ See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete documentation.
 ## Documentation
 
 - [Quick Start Guide](QUICK_START.md) - Fast setup walkthrough
+- [PC Control Agent](qwen-agent/PC_CONTROL_AGENT.md) - Voice-controlled PC operations (NEW!)
 - [Memory Integration](MEMORY_INTEGRATION.md) - Letta-style memory system documentation
 - [HA Assist Setup](HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
 - [HA Voice Config](HA_VOICE_CONFIG.md) - Voice pipeline setup
@@ -262,7 +264,11 @@ HAssistant/
 │   ├── main.py
 │   └── requirements.txt
 ├── qwen-agent/                     # AI orchestration service
-│   └── Dockerfile
+│   ├── Dockerfile
+│   ├── pc_control_agent.py         # Voice-controlled PC agent (NEW!)
+│   ├── requirements.txt            # Python dependencies
+│   ├── test_pc_control.py          # Test suite
+│   └── PC_CONTROL_AGENT.md         # Documentation
 ├── vision-gateway/                 # Vision processing service
 │   ├── Dockerfile
 │   └── app/main.py
