@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 import numpy as np
 
 # Keywords we're looking for in meeting UIs
-ANCHOR_KEYWORDS = os.getenv("ANCHOR_KEYWORDS", "Accept,Send,Join,Decline").split(",")
+ANCHOR_KEYWORDS = os.getenv("ANCHOR_KEYWORDS", "Accept,Send,Decline").split(",")
 ANCHOR_KEYWORDS_LOWER = [kw.strip().lower() for kw in ANCHOR_KEYWORDS]
 
 # We'll import the shared OCR instance from main
@@ -21,7 +21,7 @@ def set_shared_ocr(ocr_instance):
 
 def detect_buttons(frame: np.ndarray, ocr_boxes: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """
-    Scan frame for button keywords (Accept, Join, Decline, Send)
+    Scan frame for button keywords (Accept, Decline, Send)
 
     Args:
         frame: OpenCV image (BGR)

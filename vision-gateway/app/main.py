@@ -23,7 +23,7 @@ COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "8"))
 OCR_MODE = os.getenv("OCR_MODE", "anchor_based")  # anchor_based or full_screen
 
 # Keywords we care about
-SEED_WORDS = [r"accept", r"decline", r"join(?:\s+now)?", r"send(?:\s+update)?", r"meeting", r"invite", r"calendar"]
+SEED_WORDS = [r"accept", r"decline", r"send(?:\s+update)?", r"meeting", r"invite", r"calendar"]
 TIME_PAT = re.compile(r"\b([01]?\d|2[0-3]):[0-5]\d(\s?[APap]\.?M\.?)?\b")
 DATE_PAT = re.compile(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)?\,?\s?(?:\d{1,2}\/\d{1,2}|\d{4}-\d{2}-\d{2}|\w+\s+\d{1,2})\b")
 
@@ -43,6 +43,7 @@ class ROITracker:
         crop = frame[y:y+h, x:x+w]
         self.baseline = self._features(crop)
         self.last_pressed_ts = 0.0
+        self.init_time = time.time()  # Track when tracker was created
 
     def _features(self, crop):
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
@@ -67,9 +68,15 @@ class ROITracker:
         dv = float((f["mean_hsv"][2] - self.baseline["mean_hsv"][2]) / max(1.0, self.baseline["mean_hsv"][2]))
         dcontrast = float((f["contrast"] - self.baseline["contrast"]) / max(1.0, self.baseline["contrast"]))
         dedge = float((f["edge"] - self.baseline["edge"]) / max(1.0, self.baseline["edge"]))
-        pressed = (s < 0.70) or (dv < -0.12) or (dcontrast < -0.20) or (dedge < -0.15)
+        # More conservative thresholds to avoid false positives
+        pressed = (s < 0.60) or (dv < -0.20) or (dcontrast < -0.30) or (dedge < -0.25)
         now = time.time()
-        sustained = pressed and (now - self.last_pressed_ts > 0.5)
+
+        # Warmup period: ignore presses for first 2 seconds after tracker init
+        if (now - self.init_time) < 2.0:
+            return {"ok": True, "pressed": False, "bbox":[x,y,w,h], "ssim":s, "dv":dv, "warmup": True}
+
+        sustained = pressed and (now - self.last_pressed_ts > 1.0)  # Require 1s sustained press
         if pressed:
             self.last_pressed_ts = now
         return {"ok": True, "pressed": sustained, "bbox":[x,y,w,h], "ssim":s, "dv":dv, "dcontrast":dcontrast, "dedge":dedge}
@@ -163,9 +170,9 @@ def call_qwen_vl(full_img: np.ndarray, crops: List[Dict[str,Any]]) -> Dict[str,A
     prompt = (
       "You are a UI vision agent. From these images (first is full frame, others are crops), "
       "determine if there is a meeting invite/join dialog. Extract: "
-      "app (Teams/Zoom/Meet/Unknown), invite_detected (true/false), title, start_iso if present, "
+      "app (Teams/Zoom/Meet/Unknown), invite_detected (true/false), title, attendees, start_iso, end_iso if present, "
       "buttons (array), and action_state (one of: pending/accepted/declined/joined/none). "
-      "Return strict minified JSON with keys: app, invite_detected, title, start_iso, buttons, action_state, confidence."
+      "Return strict minified JSON with keys: app, invite_detected, title, attendees, start_iso, end_iso buttons, action_state, confidence."
     )
     images = [b64_jpg(full_img)] + [c["b64"] for c in crops]
     try:
@@ -180,9 +187,9 @@ def call_qwen_vl(full_img: np.ndarray, crops: List[Dict[str,Any]]) -> Dict[str,A
         if m:
             import json
             return json.loads(m.group(0))
-        return {"app":"Unknown","invite_detected":False,"title":"","start_iso":"","buttons":[],"action_state":"none","confidence":0.0}
+        return {"app":"Unknown","invite_detected":False,"title":"","attendees":"","start_iso":"","end_iso":"","buttons":[],"action_state":"none","confidence":0.0}
     except Exception:
-        return {"app":"Unknown","invite_detected":False,"title":"","start_iso":"","buttons":[],"action_state":"none","confidence":0.0}
+        return {"app":"Unknown","invite_detected":False,"title":"","attendees":"","start_iso":"","end_iso":"","buttons":[],"action_state":"none","confidence":0.0}
 
 last_motion_ts: Dict[str,float] = {"hdmi":0.0}
 prev_gray_map: Dict[str,np.ndarray] = {}
@@ -211,15 +218,15 @@ def process_frame(source: str, frame: np.ndarray) -> Dict[str,Any]:
     crops = smart_crops(frame_ds, boxes)
 
     # If we see an action word, lock tracker
-    for b in boxes:
-        t = b["text"].lower()
-        if re.search(r"\b(accept|join|decline|send)\b", t):
-            # expand a bit and start tracker for this source
-            x,y,w,h = b["bbox"]; pad = int(max(w,h)*0.5)
-            x,y = max(0,x-pad), max(0,y-pad)
-            w,h = min(frame_ds.shape[1]-x, w+2*pad), min(frame_ds.shape[0]-y, h+2*pad)
-            _trackers[source] = ROITracker(frame_ds, (x,y,w,h))
-            break
+    #for b in boxes:
+    #    t = b["text"].lower()
+    #    if re.search(r"\b(accept|decline|send)\b", t):
+    #        # expand a bit and start tracker for this source
+    #        x,y,w,h = b["bbox"]; pad = int(max(w,h)*0.5)
+    #        x,y = max(0,x-pad), max(0,y-pad)
+    #        w,h = min(frame_ds.shape[1]-x, w+2*pad), min(frame_ds.shape[0]-y, h+2*pad)
+    #       _trackers[source] = ROITracker(frame_ds, (x,y,w,h))
+    #        break
 
     # Call VL to interpret (optional but recommended)
     vl = call_qwen_vl(frame_ds, crops)
@@ -230,7 +237,9 @@ def process_frame(source: str, frame: np.ndarray) -> Dict[str,Any]:
             "source": source,
             "app": vl.get("app","Unknown"),
             "title": vl.get("title",""),
+            "attendees": vl.get("attendees",""),
             "start_iso": vl.get("start_iso",""),
+            "end_iso": vl.get("end_iso",""),
             "buttons": vl.get("buttons",[]),
             "confidence": vl.get("confidence",0.0)
         })
@@ -371,6 +380,10 @@ def frigate_stream_loop():
             # Downscale for faster processing
             frame_ds = downscale_keep_long(frame, HDMI_RESIZE_LONG)
 
+            # Crop to left half for button detection (buttons are typically on left)
+            h, w = frame_ds.shape[:2]
+            left_half = frame_ds[:, :w//4]  # Left 50% of screen
+
             # If we're tracking a button, check for press
             if button_tracker is not None:
                 track_result = button_tracker.update_and_check(frame_ds)
@@ -391,7 +404,7 @@ def frigate_stream_loop():
                     buttons = anchor_detector.detect_buttons(frame_ds, ocr_boxes=ocr_boxes)
 
                     if buttons:
-                        priority_order = ["accept", "join", "decline", "send"]
+                        priority_order = ["accept", "decline", "send"]
                         buttons_sorted = sorted(buttons, key=lambda b: priority_order.index(b["keyword"]) if b["keyword"] in priority_order else 999)
                         primary_button = buttons_sorted[0]
 
@@ -427,12 +440,32 @@ def frigate_stream_loop():
                             "detection_mode": "press_triggered"
                         }
 
+                        # Scale coordinates to match 640x360 display size
+                        h_ds, w_ds = frame_ds.shape[:2]
+                        scale_x, scale_y = 640 / w_ds, 360 / h_ds
+
+                        scaled_bbox = [
+                            int(primary_button["bbox"][0] * scale_x),
+                            int(primary_button["bbox"][1] * scale_y),
+                            int(primary_button["bbox"][2] * scale_x),
+                            int(primary_button["bbox"][3] * scale_y)
+                        ]
+
+                        scaled_zones = {}
+                        for zone_name, zone_bbox in context.get("zones", {}).items():
+                            scaled_zones[zone_name] = [
+                                int(zone_bbox[0] * scale_x),
+                                int(zone_bbox[1] * scale_y),
+                                int(zone_bbox[2] * scale_x),
+                                int(zone_bbox[3] * scale_y)
+                            ]
+
                         recent_detections.insert(0, {
                             "timestamp": time.time(),
                             "result": result,
                             "frame_b64": b64_jpg(cv2.resize(frame_ds, (640, 360))),
-                            "button_bbox": primary_button["bbox"],
-                            "context_zones": context.get("zones", {})
+                            "button_bbox": scaled_bbox,
+                            "context_zones": scaled_zones
                         })
                         recent_detections[:] = recent_detections[:10]
 
@@ -443,31 +476,32 @@ def frigate_stream_loop():
                     time.sleep(5)  # Cooldown after press
                 else:
                     # Still tracking, no press yet
-                    time.sleep(2)  # Poll every 2s when tracking (reduce CPU)
+                    time.sleep(1.0)  # Poll at 1 FPS when tracking (balance speed vs CPU)
                 continue
 
             # ===== Phase 1: Lightweight scan for buttons (no tracking yet) =====
-            ocr_boxes = ocr_with_boxes(frame_ds)
+            # Scan only left half for better performance
+            ocr_boxes = ocr_with_boxes(left_half)
 
             if not ocr_boxes:
                 time.sleep(5)
                 continue
 
-            buttons = anchor_detector.detect_buttons(frame_ds, ocr_boxes=ocr_boxes)
+            buttons = anchor_detector.detect_buttons(left_half, ocr_boxes=ocr_boxes)
 
             if buttons:
                 # Found button! Start tracking it
-                priority_order = ["accept", "join", "decline", "send"]
+                priority_order = ["accept", "decline", "send"]
                 buttons_sorted = sorted(buttons, key=lambda b: priority_order.index(b["keyword"]) if b["keyword"] in priority_order else 999)
                 primary_button = buttons_sorted[0]
 
-                print(f"[frigate_stream] 👁️  Found {primary_button['keyword']} button, starting visual tracking...", flush=True)
+                print(f"[frigate_stream] 👁️  Found {primary_button['keyword']} button at ({primary_button['bbox'][0]}, {primary_button['bbox'][1]}), starting visual tracking...", flush=True)
 
-                # Initialize tracker on this button
+                # Initialize tracker on this button (use full frame for tracking)
                 x, y, w, h = primary_button["bbox"]
                 button_tracker = ROITracker(frame_ds, (x, y, w, h))
 
-                time.sleep(1)  # Brief pause before starting tracking loop
+                time.sleep(3)  # Wait longer before checking press to avoid false positives
             else:
                 # No buttons, keep scanning
                 time.sleep(5)
@@ -523,38 +557,56 @@ async def debug_page():
         <div id="detections"></div>
         <script>
             function drawBoundingBoxes(imgElement, buttonBbox, contextZones) {
+                console.log('drawBoundingBoxes called', {buttonBbox, contextZones, imgNaturalWidth: imgElement.naturalWidth, imgNaturalHeight: imgElement.naturalHeight});
+
                 const container = imgElement.parentElement;
+
+                // Remove any existing canvas
+                const existingCanvas = container.querySelector('canvas');
+                if (existingCanvas) existingCanvas.remove();
+
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
 
-                // Set canvas size to match image
-                canvas.width = imgElement.naturalWidth;
-                canvas.height = imgElement.naturalHeight;
-                canvas.style.width = imgElement.width + 'px';
-                canvas.style.height = imgElement.height + 'px';
+                // Match canvas to image's DISPLAYED size
+                const displayWidth = imgElement.offsetWidth || imgElement.width;
+                const displayHeight = imgElement.offsetHeight || imgElement.height;
+
+                canvas.width = displayWidth;
+                canvas.height = displayHeight;
+                canvas.style.position = 'absolute';
+                canvas.style.top = '0';
+                canvas.style.left = '0';
+                canvas.style.pointerEvents = 'none';
+
+                // Scale coordinates from natural size (640x360) to displayed size
+                const scaleX = displayWidth / imgElement.naturalWidth;
+                const scaleY = displayHeight / imgElement.naturalHeight;
+
+                console.log('Canvas created:', {width: canvas.width, height: canvas.height});
 
                 // Draw button bbox (green)
                 if (buttonBbox && buttonBbox.length === 4) {
                     const [x, y, w, h] = buttonBbox;
                     ctx.strokeStyle = '#00ff00';
-                    ctx.lineWidth = 3;
-                    ctx.strokeRect(x, y, w, h);
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
                     ctx.fillStyle = '#00ff00';
-                    ctx.font = '16px monospace';
-                    ctx.fillText('BUTTON', x, y - 5);
+                    ctx.font = '14px monospace';
+                    ctx.fillText('BUTTON', x * scaleX, Math.max(y * scaleY - 5, 12));
                 }
 
-                // Draw context zones
+                // Draw context zones (with scaling)
                 if (contextZones) {
                     // Title zone (red)
                     if (contextZones.title && contextZones.title.length === 4) {
                         const [x, y, w, h] = contextZones.title;
                         ctx.strokeStyle = '#ff0000';
                         ctx.lineWidth = 2;
-                        ctx.strokeRect(x, y, w, h);
+                        ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
                         ctx.fillStyle = '#ff0000';
                         ctx.font = '14px monospace';
-                        ctx.fillText('TITLE', x, y - 5);
+                        ctx.fillText('TITLE', x * scaleX, Math.max(y * scaleY - 5, 12));
                     }
 
                     // Start time zone (blue)
@@ -562,10 +614,10 @@ async def debug_page():
                         const [x, y, w, h] = contextZones.time_start;
                         ctx.strokeStyle = '#0000ff';
                         ctx.lineWidth = 2;
-                        ctx.strokeRect(x, y, w, h);
+                        ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
                         ctx.fillStyle = '#0000ff';
                         ctx.font = '14px monospace';
-                        ctx.fillText('START', x, y - 5);
+                        ctx.fillText('START', x * scaleX, Math.max(y * scaleY - 5, 12));
                     }
 
                     // End time zone (magenta)
@@ -573,10 +625,10 @@ async def debug_page():
                         const [x, y, w, h] = contextZones.time_end;
                         ctx.strokeStyle = '#ff00ff';
                         ctx.lineWidth = 2;
-                        ctx.strokeRect(x, y, w, h);
+                        ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
                         ctx.fillStyle = '#ff00ff';
                         ctx.font = '14px monospace';
-                        ctx.fillText('END', x, y - 5);
+                        ctx.fillText('END', x * scaleX, Math.max(y * scaleY - 5, 12));
                     }
 
                     // Location zone (cyan)
@@ -584,10 +636,10 @@ async def debug_page():
                         const [x, y, w, h] = contextZones.location;
                         ctx.strokeStyle = '#00ffff';
                         ctx.lineWidth = 2;
-                        ctx.strokeRect(x, y, w, h);
+                        ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
                         ctx.fillStyle = '#00ffff';
                         ctx.font = '14px monospace';
-                        ctx.fillText('LOCATION', x, y - 5);
+                        ctx.fillText('LOCATION', x * scaleX, Math.max(y * scaleY - 5, 12));
                     }
 
                     // Attendees zone (yellow)
@@ -595,10 +647,10 @@ async def debug_page():
                         const [x, y, w, h] = contextZones.attendees;
                         ctx.strokeStyle = '#ffff00';
                         ctx.lineWidth = 2;
-                        ctx.strokeRect(x, y, w, h);
+                        ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
                         ctx.fillStyle = '#ffff00';
                         ctx.font = '14px monospace';
-                        ctx.fillText('ATTENDEES', x, y - 5);
+                        ctx.fillText('ATTENDEES', x * scaleX, Math.max(y * scaleY - 5, 12));
                     }
                 }
 
@@ -627,13 +679,20 @@ async def debug_page():
                             </div>
                         ` : '';
 
+                        // Add unique ID for debugging
+                        const imgId = 'img_' + d.timestamp;
+                        const debugInfo = `Button: ${JSON.stringify(d.button_bbox)}, Has zones: ${!!d.context_zones}`;
+
                         return `
                             <div class="detection">
                                 <div class="timestamp">${new Date(d.timestamp * 1000).toLocaleString()}</div>
                                 ${buttonInfo}
-                                <div class="image-container">
-                                    <img src="data:image/jpeg;base64,${d.frame_b64}"
-                                         onload="drawBoundingBoxes(this, ${JSON.stringify(d.button_bbox)}, ${JSON.stringify(d.context_zones)})">
+                                <div style="color: yellow; font-size: 10px;">DEBUG: ${debugInfo}</div>
+                                <div class="image-container" style="position: relative;">
+                                    <img id="${imgId}" src="data:image/jpeg;base64,${d.frame_b64}"
+                                         style="display: block;"
+                                         onload='console.log("Image loaded:", "${imgId}"); drawBoundingBoxes(this, ${JSON.stringify(d.button_bbox)}, ${JSON.stringify(d.context_zones)})'
+                                         onerror='console.error("Image failed to load:", "${imgId}")'>
                                 </div>
                                 ${contextInfo}
                                 <details>
