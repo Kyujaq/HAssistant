@@ -111,3 +111,6 @@ ha_config/tts/
 inventory.sqlite
 inventory.sqlite-shm
 inventory.sqlite-wal
+example_inventory.sqlite
+example_inventory.sqlite-shm
+example_inventory.sqlite-wal
