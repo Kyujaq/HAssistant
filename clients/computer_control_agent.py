@@ -14,6 +14,17 @@ import json
 import base64
 from typing import Dict, Any, List, Optional, Tuple
 from io import BytesIO
+from pathlib import Path
+
+# Ensure repository root is on sys.path for shared integration helpers
+CURRENT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = CURRENT_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+# Shared integration helpers
+from shared.voice import get_windows_voice_bridge
+from shared.vision import VisionGatewayClient
 
 # Computer control libraries
 try:
@@ -63,23 +74,19 @@ class ComputerControlAgent:
         
         self.use_windows_voice = use_windows_voice
         self.windows_voice_bridge = None
-        
+        self.vision_client = VisionGatewayClient(VISION_GATEWAY_URL)
+
         if use_windows_voice:
-            try:
-                from windows_voice_control import speak_command, type_text, send_keystroke, open_application
-                self.windows_voice_bridge = {
-                    'speak_command': speak_command,
-                    'type_text': type_text,
-                    'send_keystroke': send_keystroke,
-                    'open_application': open_application
-                }
+            bridge = get_windows_voice_bridge()
+            if bridge:
+                self.windows_voice_bridge = bridge
                 logger.info("🤖 Computer Control Agent initialized (Windows Voice Mode)")
-                logger.info("   Using Windows Voice Assistant for command execution")
-            except ImportError:
-                logger.warning("Windows voice control not available, falling back to direct control")
+                logger.info("   Windows voice backend ready for command execution")
+            else:
+                logger.warning("Windows voice control backend unavailable, falling back to direct control")
                 self.use_windows_voice = False
-        
-        if not use_windows_voice:
+
+        if not self.use_windows_voice:
             logger.info("🤖 Computer Control Agent initialized (Direct Control Mode)")
             logger.info(f"   Vision Gateway: {VISION_GATEWAY_URL}")
             logger.info(f"   Ollama: {OLLAMA_URL}")
@@ -103,16 +110,21 @@ class ComputerControlAgent:
                 # Convert PIL to OpenCV format (RGB to BGR)
                 return cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
             else:
-                # Fetch from vision-gateway
-                # Note: vision-gateway needs to expose an endpoint to get latest frame
-                response = requests.get(f"{VISION_GATEWAY_URL}/api/latest_frame/{source}", timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    if 'image' in data:
-                        img_bytes = base64.b64decode(data['image'])
-                        nparr = np.frombuffer(img_bytes, np.uint8)
-                        return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                logger.warning(f"Failed to get screenshot from vision-gateway: {response.status_code}")
+                frame, metadata = self.vision_client.fetch_latest_frame(source)
+                if frame is not None:
+                    return frame
+
+                if metadata and metadata.get('error'):
+                    logger.warning(
+                        "Failed to get screenshot from vision-gateway (%s): %s",
+                        source,
+                        metadata['error'],
+                    )
+                else:
+                    logger.warning(
+                        "Failed to get screenshot from vision-gateway for source '%s'",
+                        source,
+                    )
                 return None
         except Exception as e:
             logger.error(f"Error getting screenshot: {e}")

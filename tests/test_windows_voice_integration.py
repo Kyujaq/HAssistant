@@ -60,24 +60,19 @@ class TestWindowsVoiceIntegration(unittest.TestCase):
         self.assertIsNone(agent.windows_voice_bridge)
     
     @unittest.skip("Requires complex mock setup")
-    @patch('computer_control_agent.speak_command')
-    @patch('computer_control_agent.type_text')
-    @patch('computer_control_agent.send_keystroke')
-    @patch('computer_control_agent.open_application')
-    def test_agent_initialization_windows_voice_mode(self, mock_open, mock_key, mock_type, mock_speak):
+    @patch('clients.computer_control_agent.get_windows_voice_bridge')
+    def test_agent_initialization_windows_voice_mode(self, mock_bridge):
         """Test agent initializes in Windows Voice mode"""
-        # Mock the imports
-        with patch.dict('sys.modules', {
-            'windows_voice_control': MagicMock(
-                speak_command=mock_speak,
-                type_text=mock_type,
-                send_keystroke=mock_key,
-                open_application=mock_open
-            )
-        }):
-            agent = ComputerControlAgent(use_windows_voice=True)
-            self.assertTrue(agent.use_windows_voice)
-            self.assertIsNotNone(agent.windows_voice_bridge)
+        mock_bridge.return_value = {
+            'speak_command': MagicMock(),
+            'type_text': MagicMock(),
+            'send_keystroke': MagicMock(),
+            'open_application': MagicMock(),
+        }
+
+        agent = ComputerControlAgent(use_windows_voice=True)
+        self.assertTrue(agent.use_windows_voice)
+        self.assertIsNotNone(agent.windows_voice_bridge)
     
     def test_windows_voice_env_variable(self):
         """Test USE_WINDOWS_VOICE environment variable"""
@@ -85,7 +80,7 @@ class TestWindowsVoiceIntegration(unittest.TestCase):
         
         # Reload module to pick up env var
         import importlib
-        import computer_control_agent
+        import clients.computer_control_agent as computer_control_agent
         importlib.reload(computer_control_agent)
         
         self.assertTrue(computer_control_agent.USE_WINDOWS_VOICE)
