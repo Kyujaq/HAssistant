@@ -18,7 +18,12 @@ from .schemas import (
     Task, TaskStatus, TaskPriority,
     EnrichmentTask, ConsolidationTask, CalendarTask
 )
-from .crews import InformationEnrichmentCrew, MemoryConsolidationCrew
+from .crews import (
+    InformationEnrichmentCrew,
+    MemoryConsolidationCrew,
+    ProactivePlanningCrew,
+    PatternAnalysisCrew
+)
 from .tools import calendar_tools, memory_tools
 from .guards import GuardRails
 
@@ -43,6 +48,8 @@ class OvernightOrchestrator:
     def __init__(self):
         self.enrichment_crew = InformationEnrichmentCrew()
         self.consolidation_crew = MemoryConsolidationCrew()
+        self.planning_crew = ProactivePlanningCrew()
+        self.analysis_crew = PatternAnalysisCrew()
         self.guards = GuardRails()
         self.tasks: Dict[str, Task] = {}
         logger.info("Initialized OvernightOrchestrator")
@@ -53,8 +60,10 @@ class OvernightOrchestrator:
         
         This includes:
         1. Memory consolidation
-        2. Calendar review
-        3. Maintenance tasks
+        2. Proactive planning (commute alerts, task research)
+        3. Pattern analysis (energy insights)
+        4. Calendar review
+        5. Maintenance tasks
         """
         logger.info("Starting overnight intelligence cycle")
         cycle_start = datetime.now()
@@ -80,8 +89,53 @@ class OvernightOrchestrator:
                 logger.error(f"Memory consolidation failed: {e}")
                 results["tasks_failed"].append("memory_consolidation")
                 results["errors"].append(str(e))
+            
+            # Task 2: Proactive planning (commute alerts + task research)
+            logger.info("Running proactive planning...")
+            try:
+                planning_result = await self.planning_crew.run_daily_planning(
+                    user_location=os.getenv("USER_LOCATION", "Home"),
+                    todo_entity_id=os.getenv("TODO_ENTITY_ID", "todo.tasks"),
+                    days_ahead=1
+                )
+                results["tasks_completed"].append("proactive_planning")
+                results["commute_alerts_count"] = len(planning_result.commute_alerts)
+                results["research_briefings_count"] = len(planning_result.research_briefings)
+                results["commute_alerts"] = [
+                    {
+                        "event": alert.event_title,
+                        "travel_time": alert.predicted_travel_time_minutes,
+                        "departure": alert.recommended_departure_time,
+                        "reason": alert.reasoning
+                    }
+                    for alert in planning_result.commute_alerts
+                ]
+            except Exception as e:
+                logger.error(f"Proactive planning failed: {e}")
+                results["tasks_failed"].append("proactive_planning")
+                results["errors"].append(str(e))
+            
+            # Task 3: Pattern analysis (energy insights)
+            logger.info("Running pattern analysis...")
+            try:
+                analysis_result = await self.analysis_crew.run_daily_analysis()
+                results["tasks_completed"].append("pattern_analysis")
+                results["energy_insights_count"] = len(analysis_result.energy_insights)
+                results["total_energy_kwh"] = analysis_result.total_consumption_kwh
+                results["energy_insights"] = [
+                    {
+                        "title": insight.title,
+                        "description": insight.description,
+                        "severity": insight.severity
+                    }
+                    for insight in analysis_result.energy_insights[:5]  # Top 5
+                ]
+            except Exception as e:
+                logger.error(f"Pattern analysis failed: {e}")
+                results["tasks_failed"].append("pattern_analysis")
+                results["errors"].append(str(e))
                 
-            # Task 2: Calendar review
+            # Task 4: Calendar review
             logger.info("Reviewing calendar...")
             try:
                 upcoming_events = await calendar_tools.get_upcoming_events(days=7)
@@ -104,7 +158,7 @@ class OvernightOrchestrator:
                 results["tasks_failed"].append("calendar_review")
                 results["errors"].append(str(e))
                 
-            # Task 3: Memory maintenance
+            # Task 5: Memory maintenance
             logger.info("Running memory maintenance...")
             try:
                 maintenance_result = await memory_tools.run_maintenance()
