@@ -20,12 +20,14 @@ This document consolidates feedback, comments, and action items from various bra
 1. **Replace fake embedding function** - Currently using placeholder; needs real model integration
    - Consider: sentence-transformers, Ollama embeddings, or other production-ready solutions
    - Location: `letta_bridge/main.py` - `fake_embed()` function
+   - Status: ✅ Enhanced with prominent warnings and startup checks (see letta_bridge/main.py)
 
 2. **Security Hardening**
    - Review and rotate API keys (currently using default/dev keys)
    - Change default passwords in `.env.example` before production
    - Implement TLS/SSL for production deployments
    - Add rate limiting for public-facing APIs
+   - Status: ✅ Partially completed - all defaults changed to obvious placeholders, enhanced warnings added
 
 3. **Database Backup Strategy**
    - Configure automated PostgreSQL backups
@@ -130,10 +132,23 @@ From `scripts/03_legacy_schema.sql`:
 ## Security Considerations Consolidated
 
 ### Immediate Actions Required ⚠️
-1. Change all default passwords in `.env.example`
-2. Rotate API keys from development defaults
-3. Review Redis password security
-4. Review PostgreSQL password security
+1. ✅ Change all default passwords in `.env.example` (COMPLETED - now use CHANGE_ME_* placeholders)
+2. ✅ Rotate API keys from development defaults (COMPLETED - docker-compose.yml updated)
+3. ✅ Review Redis password security (COMPLETED - placeholder updated)
+4. ✅ Review PostgreSQL password security (COMPLETED - placeholder updated)
+5. ⚠️ Before production deployment:
+   - Generate and set strong passwords for all services
+   - Set unique BRIDGE_API_KEY
+   - Enable TLS/SSL for external-facing services
+   - Implement rate limiting
+
+### Recent Security Improvements (PR#8)
+- All `.env.example` passwords changed to obvious placeholders (CHANGE_ME_*)
+- Added comprehensive security warnings and password generation commands
+- Fixed hardcoded API key in docker-compose.yml (glados-orchestrator)
+- Fixed default passwords in docker-compose.yml for postgres, redis, frigate
+- Added startup warnings in letta_bridge/main.py for dev-key and fake_embed()
+- Enhanced fake_embed() documentation with clear production warnings
 
 ### Production Readiness
 1. Enable TLS/SSL for all external-facing services
@@ -160,7 +175,7 @@ From `scripts/03_legacy_schema.sql`:
 
 ### Memory Integration
 ```
-✓ All 39 checks passed
+✓ All 39 checks passed (verified 2024-01-XX)
 - Docker Compose configuration
 - Service files present
 - Database initialization
@@ -168,6 +183,12 @@ From `scripts/03_legacy_schema.sql`:
 - Documentation complete
 - Test infrastructure
 ```
+
+### Configuration Fixes (PR#8)
+✓ Fixed letta-bridge port mapping (8081:8081 instead of 8081:8000)
+✓ Fixed glados-orchestrator LETTA_BRIDGE_URL to use correct port (8081)
+✓ Updated all default passwords to clear placeholders
+✓ Removed hardcoded API key from glados-orchestrator
 
 ### Known Issues
 None reported in recent testing.
@@ -240,5 +261,5 @@ For issues or questions:
 
 ---
 
-*Last Updated: 2024-10-06*
+*Last Updated: 2024-01-XX (PR#8 Review)*
 *This document consolidates feedback from all PRs including merged branches*

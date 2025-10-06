@@ -4,6 +4,17 @@ A complete voice assistant implementation that layers Home Assistant's Assist AP
 
 ## Features
 
+- **Local LLM Processing**: Ollama with GPU support (GTX 1080 Ti + GTX 1070)
+- **Voice Interaction**: Wyoming Whisper (STT) + Piper (TTS) with GLaDOS voice
+- **Raspberry Pi Client**: Wake word detection and voice processing
+- **PC Control Agent**: Qwen-based voice control for PC operations (NEW!)
+- **Home Assistant Integration**: Native Assist API integration
+- **Memory System**: Letta Bridge with PostgreSQL + pgvector for contextual memory
+- **Dual GPU Support**: Automatic GPU allocation for optimal performance
+- **Multiple Models**: Switch between fast (Hermes-3 3B) and detailed (Qwen 2.5 7B) responses
+- **Context Awareness**: Redis-backed session caching for multi-turn conversations
+- **Computer Control Agent**: Vision-based automation for controlling another computer (Excel, browsers, etc.)
+- **Windows Voice Assistant Control**: Control Windows laptops via audio cable and TTS output
 - **Home Assistant Assist-first design**: Uses Assist conversations as the primary interface so responses land in HA history and automations.
 - **Local LLM processing**: Ollama chat + vision endpoints with GPU scheduling for Hermes-3, Qwen 2.5, and Qwen 2.5 VL models.
 - **Voice interaction**: Wyoming Whisper (STT) and Piper (TTS) with switchable voices including the tuned kathleen-high clarity profile for Windows Voice Control.
@@ -353,6 +364,7 @@ See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete documentation.
 ## Documentation
 
 - [Quick Start Guide](QUICK_START.md) - Fast setup walkthrough
+- [PC Control Agent](qwen-agent/PC_CONTROL_AGENT.md) - Voice-controlled PC operations (NEW!)
 - [Memory Integration](MEMORY_INTEGRATION.md) - Letta-style memory system documentation
 - [HA Assist Setup](HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
 - [HA Voice Config](HA_VOICE_CONFIG.md) - Voice pipeline setup
@@ -388,7 +400,11 @@ HAssistant/
 │   ├── main.py
 │   └── requirements.txt
 ├── qwen-agent/                     # AI orchestration service
-│   └── Dockerfile
+│   ├── Dockerfile
+│   ├── pc_control_agent.py         # Voice-controlled PC agent (NEW!)
+│   ├── requirements.txt            # Python dependencies
+│   ├── test_pc_control.py          # Test suite
+│   └── PC_CONTROL_AGENT.md         # Documentation
 ├── vision-gateway/                 # Vision processing service
 │   ├── Dockerfile
 │   └── app/main.py
