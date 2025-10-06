@@ -343,6 +343,88 @@ services:
     networks:
       - ha_network
   
+   # ---- NEW: Face Recognition Stack ---- #
+
+  # Double Take: Orchestrates face recognition between Frigate and CompreFace
+  double-take:
+    container_name: double-take
+    image: jakowenko/double-take
+    restart: unless-stopped
+    ports:
+      - 3000:3000 # Web UI for Double Take
+    volumes:
+      - ./double-take-config:/config
+      - ./double-take-media:/media
+    networks:
+      - ha_network
+
+  # CompreFace API: The main API service for face recognition
+  compreface-api:
+    container_name: compreface-api
+    image: exadel/compreface-api:1.1.0
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - compreface_db_storage:/var/lib/postgresql/data
+    depends_on:
+      compreface-postgres:
+        condition: service_healthy
+    environment:
+      - POSTGRES_USER=${COMPREFACE_POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${COMPREFACE_POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_URL=jdbc:postgresql://compreface-postgres:5432/frs
+      - JAVA_OPTS=-Xmx4g
+    networks:
+      - ha_network
+
+  # CompreFace Admin: The UI for managing faces and training the model
+  compreface-admin:
+    container_name: compreface-admin
+    image: exadel/compreface-admin:1.1.0
+    restart: unless-stopped
+    ports:
+      - "81:80" # CompreFace Admin UI will be on port 81
+    depends_on:
+      - compreface-api
+    networks:
+      - ha_network
+
+  # CompreFace Core: The actual face detection/recognition ML model
+  compreface-core:
+    container_name: compreface-core
+    image: exadel/compreface-core:1.1.0
+    restart: unless-stopped
+    environment:
+      - ML_PORT=3000
+      - SAVE_FACES_TO_DB=true
+    # To enable GPU acceleration for CompreFace, uncomment the deploy section below
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    networks:
+      - ha_network
+
+  # CompreFace PostgreSQL Database: A dedicated DB for CompreFace
+  compreface-postgres:
+    container_name: compreface-postgres
+    image: postgres:13.1
+    restart: unless-stopped
+    ports:
+      - "5433:5432" # Use port 5433 to avoid conflict with hassistant-postgres
+    environment:
+      - POSTGRES_USER=${COMPREFACE_POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${COMPREFACE_POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=frs
+    volumes:
+      - compreface_db_storage:/var/lib/postgresql/data
+    networks:
+      - ha_network 
+  
   # Computer Control Agent (optional, for remote computer automation)
   # Uncomment to enable computer control capabilities
   # computer-control-agent:
@@ -379,6 +461,16 @@ volumes:
     driver: local
   ollama_vision_data:
     driver: local
+    piper_data:
+  whisper_data:
+  ha_config:
+  mosquitto_config:
+  mosquitto_data:
+  mosquitto_log:
+  agent_data:
+  compreface_db_storage:
+  double-take-config:
+  double-take-media:
 
 networks:
   ha_network:
