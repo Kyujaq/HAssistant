@@ -63,7 +63,7 @@ git clone <repo-url> HAssistant
 cd HAssistant
 
 # Copy and edit environment file
-cp .env.example .env
+cp config/.env.example .env
 # Edit .env with your Home Assistant URL and token
 ```
 
@@ -110,7 +110,7 @@ The memory system is automatically integrated and running. Test it:
 ```bash
 # Run the example client (requires requests library)
 pip install requests
-python3 example_memory_client.py
+python3 examples/example_memory_client.py
 
 # Or test via curl
 curl -X GET http://localhost:8081/healthz
@@ -187,11 +187,11 @@ Quick setup:
 pip install -r requirements.txt  # TODO: create requirements.txt
 
 # Copy environment template
-cp pi_client.env.example pi_client.env
+cp config/pi_client.env.example pi_client.env
 # Edit pi_client.env with your configuration
 
 # Run client
-python3 pi_client.py
+python3 clients/pi_client.py
 ```
 
 ### Wake Word Setup
@@ -291,12 +291,71 @@ See [OVERNIGHT_INTEGRATION.md](OVERNIGHT_INTEGRATION.md) for complete documentat
 ```
 HAssistant/
 ├── docker-compose.yml              # Service orchestration
-├── .env                            # Environment configuration
-├── .env.example                    # Environment template
-├── letta_bridge/                   # Memory API service
+├── README.md                       # This file
+├── config/                         # Configuration examples
+│   ├── .env.example                # Environment template
+│   └── pi_client.env.example       # Pi client config
+├── services/                       # Core services
+│   ├── glados-orchestrator/        # Query routing service
+│   │   ├── Dockerfile
+│   │   ├── main.py
+│   │   └── requirements.txt
+│   ├── letta-bridge/               # Memory API service
+│   │   ├── Dockerfile
+│   │   ├── main.py                 # FastAPI endpoints
+│   │   └── requirements.txt
+│   ├── qwen-agent/                 # AI orchestration service
+│   │   └── Dockerfile
+│   └── vision-gateway/             # Vision processing service
+│       ├── Dockerfile
+│       └── app/main.py
+├── overnight/                      # Overnight intelligence system
 │   ├── Dockerfile
-│   ├── main.py                     # FastAPI endpoints
+│   ├── __main__.py                 # Entry point
+│   ├── orchestrator.py             # Main orchestration
+│   ├── schemas.py                  # Data models
+│   ├── guards.py                   # Safety and validation
+│   ├── crews/                      # Task crews
+│   │   ├── information_enrichment.py
+│   │   ├── memory_consolidation.py
+│   │   ├── pattern_analysis.py
+│   │   └── proactive_planning.py
+│   ├── tools/                      # Integration tools
+│   │   ├── memory_tools.py         # Letta Bridge integration
+│   │   ├── calendar_tools.py       # HA Calendar integration
+│   │   ├── todo_tools.py           # Task management integration
+│   │   ├── traffic_tools.py        # Traffic analysis
+│   │   ├── energy_tools.py         # Energy consumption tracking
+│   │   └── web_tools.py            # Web research
 │   └── requirements.txt
+├── clients/                        # Client scripts
+│   └── pi_client.py                # Raspberry Pi voice client
+├── examples/                       # Example scripts
+│   ├── example_memory_client.py    # Memory API usage
+│   ├── example_new_features.py     # New features demo
+│   └── example_overnight_client.py # Overnight system client
+├── tests/                          # Test files
+│   ├── test_memory_integration.py  # Memory API tests
+│   └── verify_memory_integration.sh
+├── docs/                           # Documentation
+│   ├── setup/                      # Setup guides
+│   │   ├── QUICK_START.md
+│   │   ├── HA_ASSIST_SETUP.md
+│   │   ├── HA_VOICE_CONFIG.md
+│   │   ├── PI_SETUP.md
+│   │   ├── PI_ETHERNET_SETUP.md
+│   │   └── WYOMING_SETUP.md
+│   ├── architecture/               # Architecture docs
+│   │   └── MEMORY_INTEGRATION.md
+│   ├── implementation/             # Implementation summaries
+│   │   ├── implementation-summary.md
+│   │   ├── memory-integration.md
+│   │   ├── memory-integration-pr.md
+│   │   ├── overnight-integration.md
+│   │   ├── overnight-new-features.md
+│   │   └── overnight-quick-ref.md
+│   ├── TESTING_ROADMAP.md
+│   └── PR_COMMENTS_INTEGRATION.md
 ├── scripts/                        # Database initialization
 │   ├── 01_enable_pgvector.sql
 │   ├── 02_letta_schema.sql         # Core memory tables
@@ -306,42 +365,12 @@ HAssistant/
 │   └── modelfiles/                 # LLM model definitions
 │       ├── Modelfile.hermes3
 │       └── Modelfile.qwen
-├── glados-orchestrator/            # Query routing service
-│   ├── Dockerfile
-│   ├── main.py
-│   └── requirements.txt
-├── qwen-agent/                     # AI orchestration service
-│   └── Dockerfile
-├── overnight/                      # Overnight intelligence system
-│   ├── Dockerfile
-│   ├── __main__.py                 # Entry point
-│   ├── orchestrator.py             # Main orchestration
-│   ├── schemas.py                  # Data models
-│   ├── artifacts.py                # Artifact management
-│   ├── guards.py                   # Safety and validation
-│   ├── crews/                      # Task crews
-│   │   ├── information_enrichment.py
-│   │   └── memory_consolidation.py
-│   ├── tools/                      # Integration tools
-│   │   ├── memory_tools.py         # Letta Bridge integration
-│   │   ├── calendar_tools.py       # HA Calendar integration
-│   │   └── web_tools.py            # Web research
-│   └── requirements.txt
-├── vision-gateway/                 # Vision processing service
-│   ├── Dockerfile
-│   └── app/main.py
 ├── ha_config/                      # Home Assistant configuration
 │   ├── configuration.yaml          # Includes memory REST commands
 │   └── automations.yaml            # Memory automation examples
-├── pi_client.py                    # Raspberry Pi voice client
-├── pi_client.env.example           # Pi client config template
-├── example_memory_client.py        # Memory API client example
-├── example_overnight_client.py     # Overnight system client example
 ├── run_overnight.sh                # Overnight cycle runner script
-├── test_memory_integration.py      # Memory API test suite
 ├── whisper_data/                   # STT model cache (auto-downloaded)
-├── piper_data/                     # TTS model cache (auto-downloaded)
-└── docs/                           # Setup guides
+└── piper_data/                     # TTS model cache (auto-downloaded)
 ```
 
 ## GPU Configuration
