@@ -94,7 +94,7 @@ services:
     environment:
       - POSTGRES_DB=hassistant
       - POSTGRES_USER=hassistant
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-hassistant_secure_password}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-CHANGE_ME_STRONG_PASSWORD_REQUIRED}
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -114,14 +114,14 @@ services:
   redis:
     image: redis:7-alpine
     container_name: hassistant-redis
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-hassistant_redis_password}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-CHANGE_ME_STRONG_PASSWORD_REQUIRED}
     volumes:
       - redis_data:/data
     ports:
       - "6380:6379"  # Use 6380 to avoid conflict with /assistant redis
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-hassistant_redis_password}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-CHANGE_ME_STRONG_PASSWORD_REQUIRED}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -135,14 +135,14 @@ services:
     env_file: .env
     restart: unless-stopped
     ports:
-      - "8081:8000"
+      - "8081:8081"  # Fixed: Map to correct internal port
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "x-api-key: ${BRIDGE_API_KEY:-change-me-to-secure-key}", "http://localhost:8000/healthz"]
+      test: ["CMD", "curl", "-f", "-H", "x-api-key: ${BRIDGE_API_KEY:-dev-key}", "http://localhost:8081/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -176,8 +176,8 @@ services:
       - OLLAMA_BASE_URL=http://ollama-chat:11434
       - QWEN_MODEL=qwen3:4b-instruct-2507-q4_K_M
       - HERMES_MODEL=glados-hermes3
-      - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8000
-      - LETTA_API_KEY=${BRIDGE_API_KEY:-d6DkfuU7zPOpcoeAVabiNNPhTH6TcFrZ}
+      - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8081
+      - LETTA_API_KEY=${BRIDGE_API_KEY:-dev-key}
       - PORT=8082
     ports:
       - "8082:8082"
@@ -264,7 +264,7 @@ services:
             - capabilities: [gpu,video]
               device_ids: ['1']   # GPU 1 → GTX 1070 (shared with vision tasks)
     environment:
-      - FRIGATE_RTSP_PASSWORD=${FRIGATE_RTSP_PASSWORD:-password}
+      - FRIGATE_RTSP_PASSWORD=${FRIGATE_RTSP_PASSWORD:-CHANGE_ME_FRIGATE_PASSWORD}
       - NVIDIA_VISIBLE_DEVICES=1
     volumes:
       - ./frigate/config:/config
