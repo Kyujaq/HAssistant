@@ -66,17 +66,7 @@ class KappariClient:
         """
         session = requests.Session()
         
-        # Configure retry strategy - but we'll handle 429 and 5xx manually for exponential backoff
-        retry_strategy = Retry(
-            total=0,  # We handle retries manually for better control
-            backoff_factor=self.BACKOFF_FACTOR,
-            status_forcelist=[]
-        )
-        
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-        
+        # All retry logic is handled manually in _make_request_with_retry
         return session
     
     def _make_request_with_retry(
