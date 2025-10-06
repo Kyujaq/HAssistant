@@ -109,7 +109,7 @@ git clone <repo-url> HAssistant
 cd HAssistant
 
 # Copy and edit environment file
-cp .env.example .env
+cp config/.env.example .env
 # Edit .env with your Home Assistant URL and token
 ```
 
@@ -216,33 +216,33 @@ Quick setup:
 pip install -r requirements.txt  # TODO: create requirements.txt
 
 # Copy environment template
-cp pi_client.env.example pi_client.env
+cp config/pi_client.env.example pi_client.env
 # Edit pi_client.env with your configuration
 
 # Run client
-python3 pi_client.py
+python3 clients/pi_client.py
 ```
 
 ## Computer Control Agent
 
 The Computer Control Agent enables automated control of another computer using vision and AI. Perfect for automating tasks in Excel, browsers, and other GUI applications.
 
-See [COMPUTER_CONTROL_AGENT.md](COMPUTER_CONTROL_AGENT.md) for complete documentation.
+See [docs/architecture/COMPUTER_CONTROL_AGENT.md](docs/architecture/COMPUTER_CONTROL_AGENT.md) for complete documentation.
 
 Quick setup:
 ```bash
 # Install dependencies
-pip install -r computer_control_requirements.txt
+pip install -r config/computer_control_requirements.txt
 
 # Install Tesseract OCR (Ubuntu/Debian)
 sudo apt-get install tesseract-ocr
 
 # Copy configuration
-cp computer_control_agent.env.example computer_control_agent.env
+cp config/computer_control_agent.env.example computer_control_agent.env
 # Edit configuration as needed
 
 # Run a task
-python computer_control_agent.py --task "Open notepad"
+python clients/computer_control_agent.py --task "Open notepad"
 ```
 
 Features:
@@ -364,7 +364,7 @@ See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete documentation.
 ## Documentation
 
 - [Quick Start Guide](QUICK_START.md) - Fast setup walkthrough
-- [PC Control Agent](qwen-agent/PC_CONTROL_AGENT.md) - Voice-controlled PC operations (NEW!)
+- [PC Control Agent](services/qwen-agent/PC_CONTROL_AGENT.md) - Voice-controlled PC operations (NEW!)
 - [Memory Integration](MEMORY_INTEGRATION.md) - Letta-style memory system documentation
 - [HA Assist Setup](HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
 - [HA Voice Config](HA_VOICE_CONFIG.md) - Voice pipeline setup
@@ -380,12 +380,75 @@ See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete documentation.
 ```
 HAssistant/
 ├── docker-compose.yml              # Service orchestration
-├── .env                            # Environment configuration
-├── .env.example                    # Environment template
-├── letta_bridge/                   # Memory API service
-│   ├── Dockerfile
-│   ├── main.py                     # FastAPI endpoints
-│   └── requirements.txt
+├── README.md                       # This file
+├── config/                         # Configuration examples
+│   ├── .env.example                # Environment template
+│   ├── pi_client.env.example       # Pi client config
+│   ├── computer_control_agent.env.example
+│   ├── windows_voice_control.env.example
+│   └── computer_control_requirements.txt
+├── services/                       # Core services
+│   ├── glados-orchestrator/        # Query routing service
+│   │   ├── Dockerfile
+│   │   ├── main.py
+│   │   └── requirements.txt
+│   ├── letta-bridge/               # Memory API service
+│   │   ├── Dockerfile
+│   │   ├── main.py                 # FastAPI endpoints
+│   │   └── requirements.txt
+│   ├── qwen-agent/                 # AI orchestration service
+│   │   ├── Dockerfile
+│   │   ├── pc_control_agent.py     # Voice-controlled PC agent
+│   │   ├── requirements.txt
+│   │   ├── test_pc_control.py      # Test suite
+│   │   └── PC_CONTROL_AGENT.md
+│   └── vision-gateway/             # Vision processing service
+│       ├── Dockerfile
+│       └── app/main.py
+├── clients/                        # Client scripts
+│   ├── pi_client.py                # Raspberry Pi voice client
+│   ├── pi_client_usb_audio.py      # Pi USB audio variant
+│   ├── windows_voice_control.py    # Windows control bridge
+│   ├── computer_control_agent.py   # Computer control client
+│   ├── ha_integration.py           # HA integration example
+│   └── Dockerfile.computer_control
+├── examples/                       # Example scripts
+│   ├── example_memory_client.py    # Memory API usage
+│   ├── example_integration.py      # Integration examples
+│   └── example_computer_control.py
+├── tests/                          # Test files
+│   ├── test_memory_integration.py  # Memory API tests
+│   ├── test_computer_control_agent.py
+│   ├── test_windows_voice_control.py
+│   ├── test_windows_voice_integration.py
+│   ├── verify_memory_integration.sh
+│   └── test_windows_clarity.sh
+├── docs/                           # Documentation
+│   ├── setup/                      # Setup guides
+│   │   ├── QUICK_START.md
+│   │   ├── HA_ASSIST_SETUP.md
+│   │   ├── HA_VOICE_CONFIG.md
+│   │   ├── PI_SETUP.md
+│   │   ├── PI_ETHERNET_SETUP.md
+│   │   ├── WYOMING_SETUP.md
+│   │   ├── WINDOWS_VOICE_ASSIST_SETUP.md
+│   │   ├── COMPUTER_CONTROL_QUICK_START.md
+│   │   ├── WINDOWS_VOICE_CONTROL_QUICK_REF.md
+│   │   └── WINDOWS_VOICE_CLARITY_GUIDE.md
+│   ├── architecture/               # Architecture docs
+│   │   ├── COMPUTER_CONTROL_ARCHITECTURE.md
+│   │   ├── COMPUTER_CONTROL_AGENT.md
+│   │   └── MEMORY_INTEGRATION.md
+│   ├── implementation/             # Implementation summaries
+│   │   ├── qwen-pc-control.md
+│   │   ├── computer-control-windows-voice.md
+│   │   ├── memory-integration.md
+│   │   ├── memory-integration-pr.md
+│   │   ├── voice-clarity.md
+│   │   ├── windows-voice.md
+│   │   └── COMPUTER_CONTROL_WINDOWS_VOICE_INTEGRATION.md
+│   ├── TESTING_ROADMAP.md
+│   └── PR_COMMENTS_INTEGRATION.md
 ├── scripts/                        # Database initialization
 │   ├── 01_enable_pgvector.sql
 │   ├── 02_letta_schema.sql         # Core memory tables
@@ -395,29 +458,13 @@ HAssistant/
 │   └── modelfiles/                 # LLM model definitions
 │       ├── Modelfile.hermes3
 │       └── Modelfile.qwen
-├── glados-orchestrator/            # Query routing service
-│   ├── Dockerfile
-│   ├── main.py
-│   └── requirements.txt
-├── qwen-agent/                     # AI orchestration service
-│   ├── Dockerfile
-│   ├── pc_control_agent.py         # Voice-controlled PC agent (NEW!)
-│   ├── requirements.txt            # Python dependencies
-│   ├── test_pc_control.py          # Test suite
-│   └── PC_CONTROL_AGENT.md         # Documentation
-├── vision-gateway/                 # Vision processing service
-│   ├── Dockerfile
-│   └── app/main.py
 ├── ha_config/                      # Home Assistant configuration
 │   ├── configuration.yaml          # Includes memory REST commands
 │   └── automations.yaml            # Memory automation examples
-├── pi_client.py                    # Raspberry Pi voice client
-├── pi_client.env.example           # Pi client config template
-├── example_memory_client.py        # Python client example
-├── test_memory_integration.py      # Memory API test suite
+├── double-take-config/             # Double-take face recognition
+│   └── config.yml
 ├── whisper_data/                   # STT model cache (auto-downloaded)
-├── piper_data/                     # TTS model cache (auto-downloaded)
-└── docs/                           # Setup guides
+└── piper_data/                     # TTS model cache (auto-downloaded)
 ```
 
 ## GPU Configuration

@@ -7,8 +7,8 @@ Demonstrates various capabilities
 import sys
 import os
 
-# Add parent directory to path to import the agent
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add clients directory to path to import the agent
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'clients'))
 
 from computer_control_agent import ComputerControlAgent
 

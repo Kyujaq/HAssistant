@@ -40,7 +40,7 @@ This roadmap provides a structured sequence for exercising the main features of 
 3. Review `letta-bridge` logs or `postgres` tables to confirm embeddings were written.
 
 **Quick checklist**
-- [ ] `letta_bridge/.env` populated with Postgres, Redis URLs, and JWT secret.
+- [ ] `services/letta-bridge/.env` populated with Postgres, Redis URLs, and JWT secret.
 - [ ] `postgres` and `redis` containers healthy and migrations applied (`scripts/*.sql`).
 - [ ] `verify_memory_integration.sh` ready to run if deeper validation needed.
 

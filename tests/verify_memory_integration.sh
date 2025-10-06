@@ -48,22 +48,22 @@ echo "Checking Letta Bridge service..."
 if [ -d "letta_bridge" ]; then
     check_passed "letta_bridge directory exists"
     
-    if [ -f "letta_bridge/main.py" ]; then
-        check_passed "letta_bridge/main.py exists"
+    if [ -f "services/letta-bridge/main.py" ]; then
+        check_passed "services/letta-bridge/main.py exists"
     else
-        check_failed "letta_bridge/main.py not found"
+        check_failed "services/letta-bridge/main.py not found"
     fi
     
-    if [ -f "letta_bridge/Dockerfile" ]; then
-        check_passed "letta_bridge/Dockerfile exists"
+    if [ -f "services/letta-bridge/Dockerfile" ]; then
+        check_passed "services/letta-bridge/Dockerfile exists"
     else
-        check_failed "letta_bridge/Dockerfile not found"
+        check_failed "services/letta-bridge/Dockerfile not found"
     fi
     
-    if [ -f "letta_bridge/requirements.txt" ]; then
-        check_passed "letta_bridge/requirements.txt exists"
+    if [ -f "services/letta-bridge/requirements.txt" ]; then
+        check_passed "services/letta-bridge/requirements.txt exists"
     else
-        check_failed "letta_bridge/requirements.txt not found"
+        check_failed "services/letta-bridge/requirements.txt not found"
     fi
 else
     check_failed "letta_bridge directory not found"
@@ -162,10 +162,10 @@ done
 # Check 8: Python dependencies in Letta Bridge
 echo ""
 echo "Checking Letta Bridge dependencies..."
-if [ -f "letta_bridge/requirements.txt" ]; then
+if [ -f "services/letta-bridge/requirements.txt" ]; then
     required_deps=("fastapi" "uvicorn" "asyncpg" "redis" "numpy")
     for dep in "${required_deps[@]}"; do
-        if grep -qi "$dep" letta_bridge/requirements.txt; then
+        if grep -qi "$dep" services/letta-bridge/requirements.txt; then
             check_passed "Letta Bridge requires $dep"
         else
             check_failed "Letta Bridge missing $dep in requirements.txt"
@@ -176,10 +176,10 @@ fi
 # Check 9: Letta Bridge API endpoints
 echo ""
 echo "Checking Letta Bridge API endpoints..."
-if [ -f "letta_bridge/main.py" ]; then
+if [ -f "services/letta-bridge/main.py" ]; then
     endpoints=("/memory/add" "/memory/search" "/memory/pin" "/memory/forget" "/daily_brief" "/healthz")
     for endpoint in "${endpoints[@]}"; do
-        if grep -q "$endpoint" letta_bridge/main.py; then
+        if grep -q "$endpoint" services/letta-bridge/main.py; then
             check_passed "Endpoint $endpoint implemented"
         else
             check_failed "Endpoint $endpoint not found"
