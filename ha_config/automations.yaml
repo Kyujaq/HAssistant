@@ -32,3 +32,111 @@
         confidence: 0.95
         tier: "medium"
         type: "event"
+
+# Auto-create work calendar events from meeting invite detections
+- id: vision_meeting_to_calendar
+  alias: Vision Gateway - Auto-Create Work Calendar Events
+  description: Automatically create calendar events when meeting invite buttons are pressed
+  trigger:
+    - platform: event
+      event_type: vision.meeting_action
+      event_data:
+        action: button_press
+  condition:
+    - condition: template
+      value_template: "{{ trigger.event.data.vl.invite_detected == true }}"
+    - condition: template
+      value_template: "{{ trigger.event.data.vl.start_iso is defined and trigger.event.data.vl.start_iso != '' }}"
+  action:
+    - variables:
+        event_title: "{{ trigger.event.data.vl.title | default('Meeting') }}"
+        event_start: "{{ trigger.event.data.vl.start_iso }}"
+        event_end: >
+          {% if trigger.event.data.vl.end_iso is defined and trigger.event.data.vl.end_iso != '' %}
+            {{ trigger.event.data.vl.end_iso }}
+          {% else %}
+            {{ (trigger.event.data.vl.start_iso | as_datetime + timedelta(hours=1)) | as_timestamp | timestamp_custom('%Y-%m-%dT%H:%M:%S%z', true) }}
+          {% endif %}
+        event_signature: "{{ (trigger.event.data.vl.title | default('Meeting')) ~ '|' ~ trigger.event.data.vl.start_iso }}"
+        last_event: "{{ states('input_text.last_calendar_event') }}"
+
+    # Check for duplicate
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ event_signature == last_event }}"
+          sequence:
+            # Duplicate detected - send notification and skip creation
+            - service: notify.persistent_notification
+              data:
+                title: "⚠️ Duplicate Meeting Detected"
+                message: >
+                  Event already exists: **Work: {{ event_title }}**
+
+                  Start: {{ event_start }}
+
+                  This event was just created. Not creating duplicate.
+
+      # Not a duplicate - create event
+      default:
+        - service: calendar.create_event
+          target:
+            entity_id: calendar.work_calendar
+          data:
+            summary: "Work: {{ event_title }}"
+            start_date_time: "{{ event_start }}"
+            end_date_time: "{{ event_end }}"
+            description: >
+              {% set desc_parts = [] %}
+              {% if trigger.event.data.vl.attendees is defined and trigger.event.data.vl.attendees != '' %}
+                {% set _ = desc_parts.append('Attendees: ' ~ trigger.event.data.vl.attendees) %}
+              {% endif %}
+              {% if trigger.event.data.vl.location is defined and trigger.event.data.vl.location != '' %}
+                {% set _ = desc_parts.append('Location: ' ~ trigger.event.data.vl.location) %}
+              {% endif %}
+              {% if trigger.event.data.vl.app is defined and trigger.event.data.vl.app != '' %}
+                {% set _ = desc_parts.append('App: ' ~ trigger.event.data.vl.app) %}
+              {% endif %}
+              {{ desc_parts | join('\n\n') }}
+
+        # Store event signature to prevent duplicates
+        - service: input_text.set_value
+          target:
+            entity_id: input_text.last_calendar_event
+          data:
+            value: "{{ event_signature }}"
+
+        # Send success notification
+        - service: notify.persistent_notification
+          data:
+            title: "✅ Work Event Created"
+            message: >
+              **Work: {{ event_title }}**
+
+              📅 Start: {{ event_start }}
+              {% if trigger.event.data.vl.end_iso is defined and trigger.event.data.vl.end_iso != '' %}
+              📅 End: {{ trigger.event.data.vl.end_iso }}
+              {% endif %}
+              {% if trigger.event.data.vl.location is defined and trigger.event.data.vl.location != '' %}
+              📍 Location: {{ trigger.event.data.vl.location }}
+              {% endif %}
+              {% if trigger.event.data.vl.app is defined and trigger.event.data.vl.app != '' %}
+              💻 App: {{ trigger.event.data.vl.app }}
+              {% endif %}
+
+              Added to Work Calendar successfully!
+
+        # Log to Letta memory
+        - service: rest_command.letta_add_memory
+          data:
+            title: "Calendar Event Created: {{ event_title }}"
+            content: >
+              Auto-created work calendar event from meeting invite detection.
+              Title: {{ event_title }}
+              Start: {{ event_start }}
+              App: {{ trigger.event.data.vl.app | default('Unknown') }}
+            tags: '["calendar", "meeting", "automation", "vision_gateway"]'
+            source: '["vision_gateway"]'
+            confidence: 0.9
+            tier: "short"
+            type: "event"

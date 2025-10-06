@@ -52,5 +52,12 @@ sensor:
       - since
       - items
 
+# Input text helper for duplicate calendar event detection
+input_text:
+  last_calendar_event:
+    name: Last Created Calendar Event
+    max: 255
+    initial: ""
+
 # Note: OpenAI Conversation must be configured via UI in Settings > Integrations
 # Configure it to use: http://hassistant-glados-orchestrator:8082/v1 with model "glados"

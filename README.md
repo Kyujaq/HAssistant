@@ -1,17 +1,67 @@
 # HAssistant - Home Assistant + Ollama Voice Assistant
 
-A complete voice assistant implementation using Home Assistant's native features, Ollama for local LLM processing, and Wyoming protocol for speech services. Features a GLaDOS-inspired personality with GPU-accelerated inference.
+A complete voice assistant implementation that layers Home Assistant's Assist API with local LLMs, memory, and automation services. The stack combines Ollama, Wyoming STT/TTS, a Letta-inspired memory bridge, and optional vision and computer control agents to deliver a GPU-accelerated GLaDOS-style experience that still plays nicely with the rest of your smart home.
 
 ## Features
 
 - **Local LLM Processing**: Ollama with GPU support (GTX 1080 Ti + GTX 1070)
 - **Voice Interaction**: Wyoming Whisper (STT) + Piper (TTS) with GLaDOS voice
 - **Raspberry Pi Client**: Wake word detection and voice processing
+- **PC Control Agent**: Qwen-based voice control for PC operations (NEW!)
 - **Home Assistant Integration**: Native Assist API integration
 - **Memory System**: Letta Bridge with PostgreSQL + pgvector for contextual memory
 - **Dual GPU Support**: Automatic GPU allocation for optimal performance
 - **Multiple Models**: Switch between fast (Hermes-3 3B) and detailed (Qwen 2.5 7B) responses
 - **Context Awareness**: Redis-backed session caching for multi-turn conversations
+- **Computer Control Agent**: Vision-based automation for controlling another computer (Excel, browsers, etc.)
+- **Windows Voice Assistant Control**: Control Windows laptops via audio cable and TTS output
+- **Home Assistant Assist-first design**: Uses Assist conversations as the primary interface so responses land in HA history and automations.
+- **Local LLM processing**: Ollama chat + vision endpoints with GPU scheduling for Hermes-3, Qwen 2.5, and Qwen 2.5 VL models.
+- **Voice interaction**: Wyoming Whisper (STT) and Piper (TTS) with switchable voices including the tuned kathleen-high clarity profile for Windows Voice Control.
+- **Letta-style memory system**: FastAPI bridge backed by PostgreSQL + pgvector and Redis for semantic recall, daily briefs, and eviction policies.
+- **Conversation orchestration**: GLaDOS Orchestrator routes prompts between Hermes (personality) and Qwen (reasoning) while syncing context to memory.
+- **Qwen-Agent tooling**: Optional agent runtime wired to Letta Bridge for advanced automation and tool execution.
+- **Vision automation**: Vision Gateway + Frigate provide anchored OCR, motion triggers, and screenshot capture for the Computer Control Agent.
+- **Computer control workflows**: Automate remote desktops with PyAutoGUI, OCR, or proxy actions through Windows Voice Assistant.
+- **Raspberry Pi clients**: Wake-word capture, Assist hand-off, and optional USB-audio bridge for Windows control over 3.5mm links.
+- **Dual GPU support**: Compose file pre-allocates dedicated GPUs per workload for predictable latency.
+
+## Branch Readiness Snapshot
+
+| Branch | Status | Summary |
+|--------|--------|---------|
+| `work` | ✅ Ready for `main` | Aggregates the memory bridge, Qwen/GLaDOS orchestration, computer control, Windows voice clarity updates, and accompanying documentation. The branch is composed entirely of fast-forward merges from the feature PRs in history and is the only active branch in the repository, so it represents the canonical state to ship. |
+
+Recent merge commits show each major feature branch already collapsed into `work`, leaving no divergent histories to reconcile before promoting to `main`.
+
+## Service Inventory
+
+| Capability | Container / Service | Purpose | Key Dependencies |
+|------------|---------------------|---------|------------------|
+| Assist + Automations | `homeassistant` | Hosts Assist API, automations, and dashboard configuration. | External `assistant_default` Docker network. |
+| Chat LLM | `ollama-chat` | Serves Hermes-3, Qwen 2.5 chat models for general dialogue. | NVIDIA GPU 0, modelfiles under `ollama/modelfiles`. |
+| Vision LLM | `ollama-vision` | Handles multimodal prompts for the Vision Gateway and computer control workflows. | NVIDIA GPU 0 (11 GB) and the Qwen2.5-VL model. |
+| Speech-to-text | `whisper` | Wyoming Whisper server with CUDA acceleration. | NVIDIA GPU 1, `whisper_data` volume. |
+| Text-to-speech | `piper-glados` | Wyoming Piper server with GLaDOS and kathleen-high voices. | NVIDIA GPU 1, `piper_data` volume. |
+| Memory API | `letta-bridge` | FastAPI bridge for tiered memory, embeddings, and briefs. | `postgres`, `redis`, `.env` secrets. |
+| Persistence | `postgres`, `redis` | Store pgvector embeddings + session cache. | `scripts/*.sql` for schema bootstrapping. |
+| Conversation router | `glados-orchestrator` | Determines when to use Hermes vs. Qwen, streams responses, syncs memory. | `ollama-chat`, `letta-bridge`. |
+| Agent runtime | `qwen-agent` | Optional advanced agent that calls tools via Letta Bridge. | `letta-bridge`, `agent_data` volume (optional). |
+| Vision ingress | `vision-gateway` | Consumes Frigate frames, performs OCR with anchors, pushes to HA. | `frigate`, `ollama-vision`, Home Assistant token. |
+| Motion capture | `frigate` | Supplies webcam motion events and snapshots to the vision stack. | NVIDIA GPU 1, USB cameras `/dev/video*`. |
+| Optional desktop automation | `computer-control-agent` (commented) | Runs PyAutoGUI + OCR tasks or relays to Windows Voice Assistant. | `vision-gateway`, `ollama-chat`, Windows voice cable setup. |
+
+These services are orchestrated through `docker-compose.yml`, and most of them can be toggled on/off depending on which capabilities you need.
+
+## System Flow Overview
+
+1. **Wake & capture**: A Raspberry Pi client or HA microphone triggers Assist, streaming audio to Wyoming Whisper.
+2. **Assist prompt**: Home Assistant forwards the transcribed prompt to the GLaDOS Orchestrator which decides whether Hermes alone can answer or whether Qwen reasoning plus Hermes personality is required.
+3. **Memory lookup**: The orchestrator and optional Qwen-Agent call the Letta Bridge to retrieve relevant memories, then persist new conversational context after replying.
+4. **Response**: Piper generates speech (optionally routed through the Windows clarity profile) which can be played locally, forwarded to the Pi client, or sent over USB audio into a Windows voice session.
+5. **Automation hooks**: Vision Gateway + Frigate monitor displays or RTSP feeds, pushing actionable events into HA or the Computer Control Agent for closed-loop automation.
+
+The architecture diagram below highlights the primary Assist → Orchestrator → Memory → Speech loop, while the service inventory shows where optional modules plug in.
 
 ## Architecture
 
@@ -59,7 +109,7 @@ git clone <repo-url> HAssistant
 cd HAssistant
 
 # Copy and edit environment file
-cp .env.example .env
+cp config/.env.example .env
 # Edit .env with your Home Assistant URL and token
 ```
 
@@ -97,7 +147,7 @@ docker exec -it hassistant-ollama ollama list
    - **Whisper STT**: `tcp://hassistant-whisper:10300`
    - **Piper TTS**: `tcp://hassistant-piper:10200`
 
-See [HA_ASSIST_SETUP.md](HA_ASSIST_SETUP.md) and [HA_VOICE_CONFIG.md](HA_VOICE_CONFIG.md) for detailed configuration.
+See [docs/setup/HA_ASSIST_SETUP.md](docs/setup/HA_ASSIST_SETUP.md) and [docs/setup/HA_VOICE_CONFIG.md](docs/setup/HA_VOICE_CONFIG.md) for detailed configuration.
 
 ### 5. Test Memory Integration (Optional)
 
@@ -123,7 +173,7 @@ curl -X POST http://localhost:8081/memory/add \
   }'
 ```
 
-See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete memory system documentation.
+See [docs/architecture/MEMORY_INTEGRATION.md](docs/architecture/MEMORY_INTEGRATION.md) for complete memory system documentation.
 
 ## Configuration
 
@@ -166,12 +216,96 @@ Quick setup:
 pip install -r requirements.txt  # TODO: create requirements.txt
 
 # Copy environment template
-cp pi_client.env.example pi_client.env
+cp config/pi_client.env.example pi_client.env
 # Edit pi_client.env with your configuration
 
 # Run client
-python3 pi_client.py
+python3 clients/pi_client.py
 ```
+
+## Computer Control Agent
+
+The Computer Control Agent enables automated control of another computer using vision and AI. Perfect for automating tasks in Excel, browsers, and other GUI applications.
+
+See [docs/architecture/COMPUTER_CONTROL_AGENT.md](docs/architecture/COMPUTER_CONTROL_AGENT.md) for complete documentation.
+
+Quick setup:
+```bash
+# Install dependencies
+pip install -r config/computer_control_requirements.txt
+
+# Install Tesseract OCR (Ubuntu/Debian)
+sudo apt-get install tesseract-ocr
+
+# Copy configuration
+cp config/computer_control_agent.env.example computer_control_agent.env
+# Edit configuration as needed
+
+# Run a task
+python clients/computer_control_agent.py --task "Open notepad"
+```
+
+Features:
+- Vision-based screen understanding with OCR
+- AI-powered decision making via Ollama
+- Support for Excel, browsers, and desktop apps
+- Safe execution with confirmations and failsafes
+- Remote control via vision-gateway integration
+- **NEW: Windows Voice Control integration** - Use Windows Voice Assistant for command execution
+
+### Computer Control + Windows Voice Integration
+
+The Computer Control Agent can now execute commands via Windows Voice Assistant, combining AI-powered vision and decision making with voice-based execution.
+
+See [COMPUTER_CONTROL_WINDOWS_VOICE_INTEGRATION.md](COMPUTER_CONTROL_WINDOWS_VOICE_INTEGRATION.md) for complete integration guide.
+
+Quick usage:
+```bash
+# Enable Windows Voice mode via environment variable
+export USE_WINDOWS_VOICE=true
+
+# Or use command line flag
+python computer_control_agent.py --windows-voice --task "Open Notepad and type Hello"
+```
+
+This integration provides:
+- AI-powered computer control with Windows Voice Assistant execution
+- No software installation needed on Windows (uses built-in Voice Assistant)
+- Physical separation via audio cable for enhanced security
+- Flexible mode switching between direct control and voice control
+
+## Windows Voice Assistant Control
+
+Control Windows laptops using Windows Voice Assistant by routing Piper TTS audio through a USB audio dongle via 3.5mm aux cable.
+
+See [WINDOWS_VOICE_ASSIST_SETUP.md](WINDOWS_VOICE_ASSIST_SETUP.md) for complete setup guide.
+
+Quick setup:
+```bash
+# Configure USB audio device
+export USB_AUDIO_DEVICE=hw:1,0  # Your USB dongle
+
+# Enable clearer voice for better recognition (recommended)
+export USE_DIRECT_PIPER=true
+export PIPER_VOICE_MODEL=en_US-kathleen-high
+export PIPER_LENGTH_SCALE=1.1
+
+# Use the USB audio version of pi_client
+cp pi_client_usb_audio.py pi_client.py
+
+# Or use the standalone control script
+python3 windows_voice_control.py "Open Notepad"
+```
+
+Features:
+- Control Windows via audio cable (no software installation needed)
+- Works with built-in Windows Voice Assistant/Cortana
+- Simple hardware setup (USB audio dongle + aux cable)
+- Integration with Home Assistant voice pipeline
+- **NEW:** Clearer kathleen-high voice for improved recognition (reduces misunderstandings)
+- **NEW:** Adjustable speech speed and volume for optimal clarity
+
+For voice clarity optimization, see [WINDOWS_VOICE_CLARITY_GUIDE.md](WINDOWS_VOICE_CLARITY_GUIDE.md).
 
 ### Wake Word Setup
 
@@ -225,29 +359,96 @@ curl "http://localhost:8081/memory/search?q=personality&k=5" \
 - **Redis**: Session caching and ephemeral data
 - **Database Schemas**: Automatic initialization via SQL scripts
 
-See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete documentation.
+See [docs/architecture/MEMORY_INTEGRATION.md](docs/architecture/MEMORY_INTEGRATION.md) for complete documentation.
 
 ## Documentation
 
 - [Quick Start Guide](QUICK_START.md) - Fast setup walkthrough
-- [Memory Integration](MEMORY_INTEGRATION.md) - Letta-style memory system documentation
-- [HA Assist Setup](HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
-- [HA Voice Config](HA_VOICE_CONFIG.md) - Voice pipeline setup
+- [PC Control Agent](services/qwen-agent/PC_CONTROL_AGENT.md) - Voice-controlled PC operations (NEW!)
+- [Memory Integration](docs/architecture/MEMORY_INTEGRATION.md) - Letta-style memory system documentation
+- [HA Assist Setup](docs/setup/HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
+- [HA Voice Config](docs/setup/HA_VOICE_CONFIG.md) - Voice pipeline setup
 - [Wyoming Setup](WYOMING_SETUP.md) - STT/TTS service configuration
 - [Pi Setup](PI_SETUP.md) - Raspberry Pi client setup
 - [Pi Ethernet Setup](PI_ETHERNET_SETUP.md) - Network configuration for Pi
+- [Computer Control Agent](docs/architecture/COMPUTER_CONTROL_AGENT.md) - Vision-based automation
+- [Computer Control Quick Start](COMPUTER_CONTROL_QUICK_START.md) - Fast setup for computer control
+- [Windows Voice Assistant Setup](WINDOWS_VOICE_ASSIST_SETUP.md) - Control Windows via audio cable
 
 ## Project Structure
 
 ```
 HAssistant/
 ├── docker-compose.yml              # Service orchestration
-├── .env                            # Environment configuration
-├── .env.example                    # Environment template
-├── letta_bridge/                   # Memory API service
-│   ├── Dockerfile
-│   ├── main.py                     # FastAPI endpoints
-│   └── requirements.txt
+├── README.md                       # This file
+├── config/                         # Configuration examples
+│   ├── .env.example                # Environment template
+│   ├── pi_client.env.example       # Pi client config
+│   ├── computer_control_agent.env.example
+│   ├── windows_voice_control.env.example
+│   └── computer_control_requirements.txt
+├── services/                       # Core services
+│   ├── glados-orchestrator/        # Query routing service
+│   │   ├── Dockerfile
+│   │   ├── main.py
+│   │   └── requirements.txt
+│   ├── letta-bridge/               # Memory API service
+│   │   ├── Dockerfile
+│   │   ├── main.py                 # FastAPI endpoints
+│   │   └── requirements.txt
+│   ├── qwen-agent/                 # AI orchestration service
+│   │   ├── Dockerfile
+│   │   ├── pc_control_agent.py     # Voice-controlled PC agent
+│   │   ├── requirements.txt
+│   │   ├── test_pc_control.py      # Test suite
+│   │   └── PC_CONTROL_AGENT.md
+│   └── vision-gateway/             # Vision processing service
+│       ├── Dockerfile
+│       └── app/main.py
+├── clients/                        # Client scripts
+│   ├── pi_client.py                # Raspberry Pi voice client
+│   ├── pi_client_usb_audio.py      # Pi USB audio variant
+│   ├── windows_voice_control.py    # Windows control bridge
+│   ├── computer_control_agent.py   # Computer control client
+│   ├── ha_integration.py           # HA integration example
+│   └── Dockerfile.computer_control
+├── examples/                       # Example scripts
+│   ├── example_memory_client.py    # Memory API usage
+│   ├── example_integration.py      # Integration examples
+│   └── example_computer_control.py
+├── tests/                          # Test files
+│   ├── test_memory_integration.py  # Memory API tests
+│   ├── test_computer_control_agent.py
+│   ├── test_windows_voice_control.py
+│   ├── test_windows_voice_integration.py
+│   ├── verify_memory_integration.sh
+│   └── test_windows_clarity.sh
+├── docs/                           # Documentation
+│   ├── setup/                      # Setup guides
+│   │   ├── QUICK_START.md
+│   │   ├── docs/setup/HA_ASSIST_SETUP.md
+│   │   ├── docs/setup/HA_VOICE_CONFIG.md
+│   │   ├── PI_SETUP.md
+│   │   ├── PI_ETHERNET_SETUP.md
+│   │   ├── WYOMING_SETUP.md
+│   │   ├── WINDOWS_VOICE_ASSIST_SETUP.md
+│   │   ├── COMPUTER_CONTROL_QUICK_START.md
+│   │   ├── WINDOWS_VOICE_CONTROL_QUICK_REF.md
+│   │   └── WINDOWS_VOICE_CLARITY_GUIDE.md
+│   ├── architecture/               # Architecture docs
+│   │   ├── COMPUTER_CONTROL_ARCHITECTURE.md
+│   │   ├── COMPUTER_CONTROL_AGENT.md
+│   │   └── docs/architecture/MEMORY_INTEGRATION.md
+│   ├── implementation/             # Implementation summaries
+│   │   ├── qwen-pc-control.md
+│   │   ├── computer-control-windows-voice.md
+│   │   ├── memory-integration.md
+│   │   ├── memory-integration-pr.md
+│   │   ├── voice-clarity.md
+│   │   ├── windows-voice.md
+│   │   └── COMPUTER_CONTROL_WINDOWS_VOICE_INTEGRATION.md
+│   ├── TESTING_ROADMAP.md
+│   └── PR_COMMENTS_INTEGRATION.md
 ├── scripts/                        # Database initialization
 │   ├── 01_enable_pgvector.sql
 │   ├── 02_letta_schema.sql         # Core memory tables
@@ -257,25 +458,13 @@ HAssistant/
 │   └── modelfiles/                 # LLM model definitions
 │       ├── Modelfile.hermes3
 │       └── Modelfile.qwen
-├── glados-orchestrator/            # Query routing service
-│   ├── Dockerfile
-│   ├── main.py
-│   └── requirements.txt
-├── qwen-agent/                     # AI orchestration service
-│   └── Dockerfile
-├── vision-gateway/                 # Vision processing service
-│   ├── Dockerfile
-│   └── app/main.py
 ├── ha_config/                      # Home Assistant configuration
 │   ├── configuration.yaml          # Includes memory REST commands
 │   └── automations.yaml            # Memory automation examples
-├── pi_client.py                    # Raspberry Pi voice client
-├── pi_client.env.example           # Pi client config template
-├── example_memory_client.py        # Python client example
-├── test_memory_integration.py      # Memory API test suite
+├── double-take-config/             # Double-take face recognition
+│   └── config.yml
 ├── whisper_data/                   # STT model cache (auto-downloaded)
-├── piper_data/                     # TTS model cache (auto-downloaded)
-└── docs/                           # Setup guides
+└── piper_data/                     # TTS model cache (auto-downloaded)
 ```
 
 ## GPU Configuration
