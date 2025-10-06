@@ -13,6 +13,8 @@ A complete voice assistant implementation using Home Assistant's native features
 - **Dual GPU Support**: Automatic GPU allocation for optimal performance
 - **Multiple Models**: Switch between fast (Hermes-3 3B) and detailed (Qwen 2.5 7B) responses
 - **Context Awareness**: Redis-backed session caching for multi-turn conversations
+- **Computer Control Agent**: Vision-based automation for controlling another computer (Excel, browsers, etc.)
+- **Windows Voice Assistant Control**: Control Windows laptops via audio cable and TTS output
 
 ## Architecture
 
@@ -174,6 +176,90 @@ cp pi_client.env.example pi_client.env
 python3 pi_client.py
 ```
 
+## Computer Control Agent
+
+The Computer Control Agent enables automated control of another computer using vision and AI. Perfect for automating tasks in Excel, browsers, and other GUI applications.
+
+See [COMPUTER_CONTROL_AGENT.md](COMPUTER_CONTROL_AGENT.md) for complete documentation.
+
+Quick setup:
+```bash
+# Install dependencies
+pip install -r computer_control_requirements.txt
+
+# Install Tesseract OCR (Ubuntu/Debian)
+sudo apt-get install tesseract-ocr
+
+# Copy configuration
+cp computer_control_agent.env.example computer_control_agent.env
+# Edit configuration as needed
+
+# Run a task
+python computer_control_agent.py --task "Open notepad"
+```
+
+Features:
+- Vision-based screen understanding with OCR
+- AI-powered decision making via Ollama
+- Support for Excel, browsers, and desktop apps
+- Safe execution with confirmations and failsafes
+- Remote control via vision-gateway integration
+- **NEW: Windows Voice Control integration** - Use Windows Voice Assistant for command execution
+
+### Computer Control + Windows Voice Integration
+
+The Computer Control Agent can now execute commands via Windows Voice Assistant, combining AI-powered vision and decision making with voice-based execution.
+
+See [COMPUTER_CONTROL_WINDOWS_VOICE_INTEGRATION.md](COMPUTER_CONTROL_WINDOWS_VOICE_INTEGRATION.md) for complete integration guide.
+
+Quick usage:
+```bash
+# Enable Windows Voice mode via environment variable
+export USE_WINDOWS_VOICE=true
+
+# Or use command line flag
+python computer_control_agent.py --windows-voice --task "Open Notepad and type Hello"
+```
+
+This integration provides:
+- AI-powered computer control with Windows Voice Assistant execution
+- No software installation needed on Windows (uses built-in Voice Assistant)
+- Physical separation via audio cable for enhanced security
+- Flexible mode switching between direct control and voice control
+
+## Windows Voice Assistant Control
+
+Control Windows laptops using Windows Voice Assistant by routing Piper TTS audio through a USB audio dongle via 3.5mm aux cable.
+
+See [WINDOWS_VOICE_ASSIST_SETUP.md](WINDOWS_VOICE_ASSIST_SETUP.md) for complete setup guide.
+
+Quick setup:
+```bash
+# Configure USB audio device
+export USB_AUDIO_DEVICE=hw:1,0  # Your USB dongle
+
+# Enable clearer voice for better recognition (recommended)
+export USE_DIRECT_PIPER=true
+export PIPER_VOICE_MODEL=en_US-kathleen-high
+export PIPER_LENGTH_SCALE=1.1
+
+# Use the USB audio version of pi_client
+cp pi_client_usb_audio.py pi_client.py
+
+# Or use the standalone control script
+python3 windows_voice_control.py "Open Notepad"
+```
+
+Features:
+- Control Windows via audio cable (no software installation needed)
+- Works with built-in Windows Voice Assistant/Cortana
+- Simple hardware setup (USB audio dongle + aux cable)
+- Integration with Home Assistant voice pipeline
+- **NEW:** Clearer kathleen-high voice for improved recognition (reduces misunderstandings)
+- **NEW:** Adjustable speech speed and volume for optimal clarity
+
+For voice clarity optimization, see [WINDOWS_VOICE_CLARITY_GUIDE.md](WINDOWS_VOICE_CLARITY_GUIDE.md).
+
 ### Wake Word Setup
 
 1. Get Porcupine access key from [Picovoice Console](https://console.picovoice.ai/)
@@ -238,6 +324,9 @@ See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete documentation.
 - [Wyoming Setup](WYOMING_SETUP.md) - STT/TTS service configuration
 - [Pi Setup](PI_SETUP.md) - Raspberry Pi client setup
 - [Pi Ethernet Setup](PI_ETHERNET_SETUP.md) - Network configuration for Pi
+- [Computer Control Agent](COMPUTER_CONTROL_AGENT.md) - Vision-based automation
+- [Computer Control Quick Start](COMPUTER_CONTROL_QUICK_START.md) - Fast setup for computer control
+- [Windows Voice Assistant Setup](WINDOWS_VOICE_ASSIST_SETUP.md) - Control Windows via audio cable
 
 ## Project Structure
 
