@@ -10,8 +10,8 @@ import tempfile
 import json
 from pathlib import Path
 
-# Add vision module to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Add vision module to path (robust absolute path resolution)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 try:
     import cv2
