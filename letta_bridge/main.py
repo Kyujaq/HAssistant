@@ -93,15 +93,25 @@ class SearchOutItem(BaseModel):
 
 # --------------------
 # Embeddings (placeholder)
-# Replace with your real model (e.g., sentence-transformers)
+# ⚠️  PRODUCTION WARNING: Replace fake_embed() with real embedding model!
 # --------------------
 def fake_embed(text: str, dim: int = EMBED_DIM) -> List[float]:
     """
-    DO NOT use in production; deterministic pseudo-embedding for scaffolding.
-    Replace with actual embedding model like:
+    ⚠️  WARNING: DO NOT use in production!
+    
+    This is a deterministic pseudo-embedding for development/testing only.
+    
+    Replace with a real embedding model before deploying to production:
     - sentence-transformers (all-MiniLM-L6-v2, all-mpnet-base-v2)
     - OpenAI ada-002
-    - Ollama embeddings
+    - Ollama embeddings (via API or local model)
+    - Hugging Face embeddings
+    
+    Example replacement with sentence-transformers:
+        from sentence_transformers import SentenceTransformer
+        model = SentenceTransformer('all-MiniLM-L6-v2')
+        def real_embed(text: str) -> List[float]:
+            return model.encode(text).tolist()
     """
     rng = np.random.default_rng(abs(hash(text)) % (2**32))
     v = rng.standard_normal(dim)
@@ -285,4 +295,42 @@ async def metrics():
     return {"uptime": "ok"}  # stub; add real metrics later
 
 if __name__ == "__main__":
+    import sys
+    import warnings
+    
+    # Production safety check
+    print("=" * 70)
+    print("🚀 Starting Letta Bridge API Server")
+    print("=" * 70)
+    
+    # Warn about fake embedding function
+    warnings.warn(
+        "\n" + "!" * 70 + "\n"
+        "⚠️  PRODUCTION WARNING: Using fake_embed() placeholder function!\n"
+        "   This is for development/testing only.\n"
+        "   Replace with a real embedding model before production deployment.\n"
+        "   See letta_bridge/main.py for implementation examples.\n"
+        + "!" * 70,
+        UserWarning,
+        stacklevel=2
+    )
+    
+    # Warn about default API key
+    if API_KEY == "dev-key":
+        warnings.warn(
+            "\n" + "!" * 70 + "\n"
+            "⚠️  SECURITY WARNING: Using default dev-key for API authentication!\n"
+            "   Set BRIDGE_API_KEY environment variable before production deployment.\n"
+            + "!" * 70,
+            UserWarning,
+            stacklevel=2
+        )
+    
+    print(f"Configuration:")
+    print(f"  - API Key: {'dev-key (⚠️  INSECURE)' if API_KEY == 'dev-key' else '***configured***'}")
+    print(f"  - Embedding Dimension: {EMBED_DIM}")
+    print(f"  - Daily Brief Window: {DAILY_BRIEF_WINDOW_HOURS}h")
+    print(f"  - Port: {os.getenv('PORT', '8081')}")
+    print("=" * 70)
+    
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8081")), reload=False)
