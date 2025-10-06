@@ -147,7 +147,7 @@ docker exec -it hassistant-ollama ollama list
    - **Whisper STT**: `tcp://hassistant-whisper:10300`
    - **Piper TTS**: `tcp://hassistant-piper:10200`
 
-See [HA_ASSIST_SETUP.md](HA_ASSIST_SETUP.md) and [HA_VOICE_CONFIG.md](HA_VOICE_CONFIG.md) for detailed configuration.
+See [docs/setup/HA_ASSIST_SETUP.md](docs/setup/HA_ASSIST_SETUP.md) and [docs/setup/HA_VOICE_CONFIG.md](docs/setup/HA_VOICE_CONFIG.md) for detailed configuration.
 
 ### 5. Test Memory Integration (Optional)
 
@@ -173,7 +173,7 @@ curl -X POST http://localhost:8081/memory/add \
   }'
 ```
 
-See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete memory system documentation.
+See [docs/architecture/MEMORY_INTEGRATION.md](docs/architecture/MEMORY_INTEGRATION.md) for complete memory system documentation.
 
 ## Configuration
 
@@ -359,19 +359,19 @@ curl "http://localhost:8081/memory/search?q=personality&k=5" \
 - **Redis**: Session caching and ephemeral data
 - **Database Schemas**: Automatic initialization via SQL scripts
 
-See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete documentation.
+See [docs/architecture/MEMORY_INTEGRATION.md](docs/architecture/MEMORY_INTEGRATION.md) for complete documentation.
 
 ## Documentation
 
 - [Quick Start Guide](QUICK_START.md) - Fast setup walkthrough
 - [PC Control Agent](services/qwen-agent/PC_CONTROL_AGENT.md) - Voice-controlled PC operations (NEW!)
-- [Memory Integration](MEMORY_INTEGRATION.md) - Letta-style memory system documentation
-- [HA Assist Setup](HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
-- [HA Voice Config](HA_VOICE_CONFIG.md) - Voice pipeline setup
+- [Memory Integration](docs/architecture/MEMORY_INTEGRATION.md) - Letta-style memory system documentation
+- [HA Assist Setup](docs/setup/HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
+- [HA Voice Config](docs/setup/HA_VOICE_CONFIG.md) - Voice pipeline setup
 - [Wyoming Setup](WYOMING_SETUP.md) - STT/TTS service configuration
 - [Pi Setup](PI_SETUP.md) - Raspberry Pi client setup
 - [Pi Ethernet Setup](PI_ETHERNET_SETUP.md) - Network configuration for Pi
-- [Computer Control Agent](COMPUTER_CONTROL_AGENT.md) - Vision-based automation
+- [Computer Control Agent](docs/architecture/COMPUTER_CONTROL_AGENT.md) - Vision-based automation
 - [Computer Control Quick Start](COMPUTER_CONTROL_QUICK_START.md) - Fast setup for computer control
 - [Windows Voice Assistant Setup](WINDOWS_VOICE_ASSIST_SETUP.md) - Control Windows via audio cable
 
@@ -426,8 +426,8 @@ HAssistant/
 ├── docs/                           # Documentation
 │   ├── setup/                      # Setup guides
 │   │   ├── QUICK_START.md
-│   │   ├── HA_ASSIST_SETUP.md
-│   │   ├── HA_VOICE_CONFIG.md
+│   │   ├── docs/setup/HA_ASSIST_SETUP.md
+│   │   ├── docs/setup/HA_VOICE_CONFIG.md
 │   │   ├── PI_SETUP.md
 │   │   ├── PI_ETHERNET_SETUP.md
 │   │   ├── WYOMING_SETUP.md
@@ -438,7 +438,7 @@ HAssistant/
 │   ├── architecture/               # Architecture docs
 │   │   ├── COMPUTER_CONTROL_ARCHITECTURE.md
 │   │   ├── COMPUTER_CONTROL_AGENT.md
-│   │   └── MEMORY_INTEGRATION.md
+│   │   └── docs/architecture/MEMORY_INTEGRATION.md
 │   ├── implementation/             # Implementation summaries
 │   │   ├── qwen-pc-control.md
 │   │   ├── computer-control-windows-voice.md
