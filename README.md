@@ -10,6 +10,9 @@ A complete voice assistant implementation using Home Assistant's native features
 - **Home Assistant Integration**: Native Assist API integration
 - **Memory System**: Letta Bridge with PostgreSQL + pgvector for contextual memory
 - **Overnight Intelligence**: Background tasks for memory consolidation and information enrichment
+  - ⭐ **NEW: Intelligent Commute Planning** - Traffic analysis and proactive travel alerts
+  - ⭐ **NEW: Energy Consumption Analysis** - Daily energy insights and anomaly detection
+  - ⭐ **NEW: Task Research & Priming** - Automatic research briefings for to-do items
 - **Dual GPU Support**: Automatic GPU allocation for optimal performance
 - **Multiple Models**: Switch between fast (Hermes-3 3B) and detailed (Qwen 2.5 7B) responses
 - **Context Awareness**: Redis-backed session caching for multi-turn conversations
@@ -276,6 +279,7 @@ See [OVERNIGHT_INTEGRATION.md](OVERNIGHT_INTEGRATION.md) for complete documentat
 - [Quick Start Guide](QUICK_START.md) - Fast setup walkthrough
 - [Memory Integration](MEMORY_INTEGRATION.md) - Letta-style memory system documentation
 - [Overnight Intelligence](OVERNIGHT_INTEGRATION.md) - Background task system documentation
+- **[New Features Documentation](OVERNIGHT_NEW_FEATURES.md)** - ⭐ Commute planning, energy analysis, and task priming
 - [HA Assist Setup](HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
 - [HA Voice Config](HA_VOICE_CONFIG.md) - Voice pipeline setup
 - [Wyoming Setup](WYOMING_SETUP.md) - STT/TTS service configuration
