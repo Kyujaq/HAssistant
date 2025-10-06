@@ -24,19 +24,40 @@ from typing import Optional
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger('windows_voice_control')
 
+def sanitize_text_input(text: str) -> str:
+    """
+    Sanitize text input to prevent command injection.
+    Removes potentially dangerous characters while preserving normal text.
+    
+    Args:
+        text: Input text to sanitize
+        
+    Returns:
+        Sanitized text safe for subprocess input
+    """
+    # Remove null bytes and other control characters that could be dangerous
+    import re
+    # Allow alphanumeric, spaces, common punctuation, but remove shell metacharacters
+    sanitized = re.sub(r'[;&|`$<>\\]', '', text)
+    return sanitized
+
+def get_bool_env(key: str, default: str = 'false') -> bool:
+    """Parse boolean environment variable consistently."""
+    return os.getenv(key, default).lower() == 'true'
+
 # Configuration from environment or defaults
 TTS_URL = os.getenv('TTS_URL', 'http://localhost:10200')
 PIPER_HOST = os.getenv('PIPER_HOST', 'hassistant-piper')
 PIPER_PORT = os.getenv('PIPER_PORT', '10200')
 USB_AUDIO_DEVICE = os.getenv('USB_AUDIO_DEVICE', 'hw:1,0')  # ALSA device for USB dongle
-USE_PULSEAUDIO = os.getenv('USE_PULSEAUDIO', 'false').lower() == 'true'
+USE_PULSEAUDIO = get_bool_env('USE_PULSEAUDIO')
 PULSEAUDIO_SINK = os.getenv('PULSEAUDIO_SINK', 'alsa_output.usb-default')
 
 # Wyoming protocol for Piper TTS (if using direct TCP connection)
-WYOMING_ENABLED = os.getenv('WYOMING_ENABLED', 'false').lower() == 'true'
+WYOMING_ENABLED = get_bool_env('WYOMING_ENABLED')
 
 # Direct Piper TTS configuration (for Windows voice commands - clearer voice)
-USE_DIRECT_PIPER = os.getenv('USE_DIRECT_PIPER', 'false').lower() == 'true'
+USE_DIRECT_PIPER = get_bool_env('USE_DIRECT_PIPER')
 PIPER_EXECUTABLE = os.getenv('PIPER_EXECUTABLE', '/usr/bin/piper')
 PIPER_VOICE_MODEL = os.getenv('PIPER_VOICE_MODEL', 'en_US-kathleen-high')  # Clearer voice for Windows
 PIPER_MODEL_PATH = os.getenv('PIPER_MODEL_PATH', '/usr/share/piper-voices')
@@ -56,6 +77,11 @@ def synthesize_with_piper(text: str, output_file: str) -> bool:
         True if successful, False otherwise
     """
     try:
+        # Sanitize text input to prevent command injection
+        sanitized_text = sanitize_text_input(text)
+        if sanitized_text != text:
+            logger.warning(f"Text input was sanitized from: {text[:50]}... to: {sanitized_text[:50]}...")
+        
         # Build Piper command
         model_file = f"{PIPER_MODEL_PATH}/{PIPER_VOICE_MODEL}.onnx"
         config_file = f"{PIPER_MODEL_PATH}/{PIPER_VOICE_MODEL}.onnx.json"
@@ -71,7 +97,7 @@ def synthesize_with_piper(text: str, output_file: str) -> bool:
         # Run Piper with text input via stdin
         result = subprocess.run(
             cmd,
-            input=text.encode('utf-8'),
+            input=sanitized_text.encode('utf-8'),
             capture_output=True,
             check=False
         )

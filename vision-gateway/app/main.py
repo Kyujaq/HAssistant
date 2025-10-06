@@ -648,7 +648,7 @@ def get_recent_detections():
     return recent_detections
 
 # Store latest frames per source
-latest_frames: Dict[str, Dict[str, Any]] = {}  # source -> {"frame": np.ndarray, "timestamp": float}
+latest_frames: Dict[str, Dict[str, Any]] = {}  # source -> {"image_b64": str, "timestamp": float}
 
 @app.get("/api/latest_frame/{source}")
 def get_latest_frame(source: str):

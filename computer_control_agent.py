@@ -31,6 +31,11 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger('computer_control_agent')
 
+# Helper function for boolean environment variables
+def get_bool_env(key: str, default: str = 'false') -> bool:
+    """Parse boolean environment variable consistently."""
+    return os.getenv(key, default).lower() == 'true'
+
 # Configuration from environment
 VISION_GATEWAY_URL = os.getenv('VISION_GATEWAY_URL', 'http://localhost:8088')
 HA_URL = os.getenv('HA_URL', 'http://localhost:8123')
@@ -39,10 +44,10 @@ OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3:4b-instruct-2507-q4_K_M')
 
 # Execution mode - can use Windows Voice Control instead of direct PyAutoGUI
-USE_WINDOWS_VOICE = os.getenv('USE_WINDOWS_VOICE', 'false').lower() == 'true'
+USE_WINDOWS_VOICE = get_bool_env('USE_WINDOWS_VOICE')
 
 # Safety settings
-CONFIRM_BEFORE_ACTION = os.getenv('CONFIRM_BEFORE_ACTION', 'true').lower() == 'true'
+CONFIRM_BEFORE_ACTION = get_bool_env('CONFIRM_BEFORE_ACTION', 'true')
 MAX_ACTIONS_PER_TASK = int(os.getenv('MAX_ACTIONS_PER_TASK', '50'))
 
 # PyAutoGUI safety settings
@@ -307,7 +312,7 @@ class ComputerControlAgent:
         
         if CONFIRM_BEFORE_ACTION:
             confirm = input(f"Execute {action_type} with params {action.get('params', {})}? (y/n): ")
-            if confirm.lower() != 'y':
+            if confirm.strip().lower() not in {'y', 'yes'}:
                 logger.info("Action cancelled by user")
                 return False
         
@@ -394,6 +399,10 @@ class ComputerControlAgent:
         """
         logger.info(f"Excel task: {task}")
         
+        # Reset counters for this task
+        self.action_count = 0
+        self.task_history = []
+        
         # Get current screenshot
         screenshot = self.get_screenshot("local")
         if screenshot is None:
@@ -433,14 +442,24 @@ Return ONLY the JSON array, no other text."""
         
         # Parse action plan
         try:
-            # Extract JSON from response
-            import re
-            json_match = re.search(r'\[.*\]', response, re.DOTALL)
-            if json_match:
-                actions = json.loads(json_match.group(0))
-            else:
-                logger.error("Could not find JSON in LLM response")
-                return False
+            # Extract JSON from response - try multiple approaches
+            decoder = json.JSONDecoder()
+            response_str = response.strip()
+            
+            # Try to parse the whole response as JSON first
+            try:
+                actions = json.loads(response_str)
+            except json.JSONDecodeError:
+                # If that fails, try to find the first JSON array in the response
+                idx = response_str.find('[')
+                if idx == -1:
+                    logger.error("Could not find JSON array in LLM response")
+                    return False
+                try:
+                    actions, end = decoder.raw_decode(response_str[idx:])
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse JSON array from LLM response: {e}")
+                    return False
             
             # Execute actions
             logger.info(f"Executing {len(actions)} actions")
