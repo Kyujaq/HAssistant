@@ -118,3 +118,65 @@ class EnrichmentResult(BaseModel):
     summary: str
     artifacts: List[Artifact] = Field(default_factory=list)
     completed_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ========================================
+# To-Do #1: Commute & Travel Schemas
+# ========================================
+
+class CommuteAlert(BaseModel):
+    """Alert for commute/travel conditions"""
+    event_title: str = Field(description="Title of the calendar event")
+    predicted_travel_time_minutes: int = Field(description="Predicted travel time in minutes")
+    recommended_departure_time: str = Field(description="Recommended departure time (ISO format)")
+    reasoning: str = Field(description="Explanation of the alert (e.g., 'Heavy traffic expected')")
+    origin: Optional[str] = None
+    destination: Optional[str] = None
+    baseline_time_minutes: Optional[int] = None
+
+
+class ProactivePlanningOutput(BaseModel):
+    """Output from the Proactive Planning Crew"""
+    task_id: str
+    calendar_events: List[Dict[str, Any]] = Field(default_factory=list)
+    commute_alerts: List[CommuteAlert] = Field(default_factory=list)
+    research_briefings: Dict[str, "ResearchBriefing"] = Field(default_factory=dict)
+    summary: str
+    completed_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ========================================
+# To-Do #2: Energy Analysis Schemas
+# ========================================
+
+class EnergyInsight(BaseModel):
+    """Energy consumption insight"""
+    title: str = Field(description="Short title for the insight")
+    description: str = Field(description="Detailed description of the insight")
+    severity: Literal["info", "warning"] = Field(default="info", description="Severity level")
+    device_name: Optional[str] = None
+    energy_kwh: Optional[float] = None
+    time_period: Optional[str] = None
+
+
+class PatternAnalysisOutput(BaseModel):
+    """Output from the Pattern Analysis Crew"""
+    task_id: str
+    energy_insights: List[EnergyInsight] = Field(default_factory=list)
+    analysis_period: str
+    total_consumption_kwh: Optional[float] = None
+    summary: str
+    completed_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ========================================
+# To-Do #3: Task Priming Schemas
+# ========================================
+
+class ResearchBriefing(BaseModel):
+    """Research briefing for a to-do task"""
+    task_title: str = Field(description="Title of the to-do task")
+    briefing: str = Field(description="Markdown briefing with summary and links")
+    memory_ids: List[str] = Field(default_factory=list, description="Relevant internal memory IDs")
+    external_urls: List[str] = Field(default_factory=list, description="Relevant external URLs")
+    confidence: float = Field(default=0.7, ge=0.0, le=1.0)
