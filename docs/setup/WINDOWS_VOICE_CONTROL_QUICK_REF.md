@@ -31,7 +31,7 @@ aplay -D hw:1,0 /usr/share/sounds/alsa/Front_Center.wav
 ### 4. Configure Environment
 ```bash
 # Copy example config
-cp windows_voice_control.env.example .env
+cp config/windows_voice_control.env.example .env
 
 # Edit your USB device
 echo "USB_AUDIO_DEVICE=hw:1,0" >> .env

@@ -36,7 +36,7 @@ pip install -r computer_control_requirements.txt
 
 ```bash
 # Copy example configuration
-cp computer_control_agent.env.example computer_control_agent.env
+cp config/computer_control_agent.env.example computer_control_agent.env
 
 # Edit if needed (defaults work for local control)
 nano computer_control_agent.env

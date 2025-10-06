@@ -90,7 +90,7 @@ From your **main server**:
 scp /home/qjaq/HAssistant/pi_client.py pi@raspberrypi.local:~/
 
 # Copy env example
-scp /home/qjaq/HAssistant/pi_client.env.example pi@raspberrypi.local:~/.env
+scp config/pi_client.env.example pi@raspberrypi.local:~/.env
 ```
 
 ### Option B: Clone from Git (if you push to GitHub)

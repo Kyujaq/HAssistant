@@ -233,7 +233,7 @@ docker exec -it hassistant-postgres psql -U hassistant -d hassistant -c "SELECT 
 ## References
 
 - **Main Documentation**: [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md)
-- **API Source**: [letta_bridge/main.py](letta_bridge/main.py)
+- **API Source**: [services/letta-bridge/main.py](services/letta-bridge/main.py)
 - **Database Schema**: [scripts/02_letta_schema.sql](scripts/02_letta_schema.sql)
 - **HA Config**: [ha_config/configuration.yaml](ha_config/configuration.yaml)
 - **Automations**: [ha_config/automations.yaml](ha_config/automations.yaml)

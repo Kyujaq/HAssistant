@@ -55,7 +55,7 @@ pip install pvporcupine numpy sounddevice requests pyaudio
 ```bash
 # Copy the client script and config
 scp user@glad0s:/home/qjaq/HAssistant/pi_client.py ~/
-scp user@glad0s:/home/qjaq/HAssistant/pi_client.env.example ~/.env
+scp config/pi_client.env.example ~/.env
 
 # Edit configuration
 nano ~/.env

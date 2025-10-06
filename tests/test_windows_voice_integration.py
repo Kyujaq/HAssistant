@@ -8,8 +8,8 @@ import sys
 import os
 from unittest.mock import Mock, patch, MagicMock
 
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add clients directory to path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'clients'))
 
 # Mock dependencies before imports
 mock_pyautogui = MagicMock()

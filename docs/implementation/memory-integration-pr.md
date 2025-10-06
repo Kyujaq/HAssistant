@@ -8,7 +8,7 @@ This pull request implements complete memory integration for HAssistant using a 
 
 ### Core Services
 
-1. **Letta Bridge API** (`letta_bridge/`)
+1. **Letta Bridge API** (`services/letta-bridge/`)
    - FastAPI service on port 8081
    - RESTful endpoints for memory operations
    - Vector similarity search

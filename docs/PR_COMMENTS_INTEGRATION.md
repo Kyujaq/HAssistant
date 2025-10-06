@@ -19,8 +19,8 @@ This document consolidates feedback, comments, and action items from various bra
 #### High Priority
 1. **Replace fake embedding function** - Currently using placeholder; needs real model integration
    - Consider: sentence-transformers, Ollama embeddings, or other production-ready solutions
-   - Location: `letta_bridge/main.py` - `fake_embed()` function
-   - Status: ✅ Enhanced with prominent warnings and startup checks (see letta_bridge/main.py)
+   - Location: `services/letta-bridge/main.py` - `fake_embed()` function
+   - Status: ✅ Enhanced with prominent warnings and startup checks (see services/letta-bridge/main.py)
 
 2. **Security Hardening**
    - Review and rotate API keys (currently using default/dev keys)
@@ -147,7 +147,7 @@ From `scripts/03_legacy_schema.sql`:
 - Added comprehensive security warnings and password generation commands
 - Fixed hardcoded API key in docker-compose.yml (glados-orchestrator)
 - Fixed default passwords in docker-compose.yml for postgres, redis, frigate
-- Added startup warnings in letta_bridge/main.py for dev-key and fake_embed()
+- Added startup warnings in services/letta-bridge/main.py for dev-key and fake_embed()
 - Enhanced fake_embed() documentation with clear production warnings
 
 ### Production Readiness

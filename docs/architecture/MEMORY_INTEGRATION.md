@@ -26,7 +26,7 @@ HAssistant implements a sophisticated memory system inspired by Letta (formerly 
 
 ## Components
 
-### 1. Letta Bridge API (`letta_bridge/`)
+### 1. Letta Bridge API (`services/letta-bridge/`)
 
 FastAPI service providing REST endpoints for memory operations:
 
