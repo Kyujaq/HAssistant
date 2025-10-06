@@ -300,6 +300,13 @@ def hdmi_loop():
         consecutive_failures = 0
         frame_i += 1
 
+        # Store latest frame for API access (Computer Control Agent)
+        global latest_frames
+        latest_frames["hdmi"] = {
+            "image_b64": b64_jpg(frame),
+            "timestamp": time.time()
+        }
+
         # --- Native ROI (pad generously to absorb small drift) ---
         x0, y0, w0, h0 = bx, by, bw, bh
         pad_x = int(w0 * 0.60)
@@ -470,6 +477,9 @@ def hdmi_loop():
         time.sleep(delay)
 
 # ---------------------- HTTP API ----------------------
+# Store latest frames per source for Computer Control Agent access
+latest_frames: Dict[str, Dict[str, Any]] = {}  # source -> {"image_b64": str, "timestamp": float}
+
 class Ingest(BaseModel):
     source: str
 
@@ -486,6 +496,27 @@ def healthz():
 @app.get("/api/detections")
 def get_recent_detections():
     return recent_detections
+
+@app.get("/api/latest_frame/{source}")
+def get_latest_frame(source: str):
+    """
+    Get the latest frame from a specific source
+    
+    Args:
+        source: Source name (e.g., "hdmi", "local")
+    
+    Returns:
+        JSON with base64-encoded image and timestamp
+    """
+    if source not in latest_frames:
+        return {"error": f"No frames available for source '{source}'"}
+    
+    frame_data = latest_frames[source]
+    return {
+        "image": frame_data["image_b64"],
+        "timestamp": frame_data["timestamp"],
+        "source": source
+    }
 
 @app.get("/debug")
 def debug_page():
