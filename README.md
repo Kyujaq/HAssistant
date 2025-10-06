@@ -227,10 +227,34 @@ curl "http://localhost:8081/memory/search?q=personality&k=5" \
 
 See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete documentation.
 
+## Kitchen Stack Orchestrator
+
+HAssistant includes a nightly pipeline orchestrator for kitchen management tasks.
+
+### Features
+
+- **Automated Pipeline**: Runs Paprika sync, inventory updates, and dietitian analysis
+- **Timestamped Artifacts**: Stores results in `/data/artifacts/YYYY-MM-DD/`
+- **Docker Integration**: Runs as a scheduled service with docker-compose
+- **Extensible**: Easy to add new agents to the pipeline
+
+### Quick Start
+
+```bash
+# Run the nightly pipeline manually
+docker compose --profile manual up kitchen-nightly
+
+# Set up automated nightly runs (cron example)
+0 2 * * * cd /path/to/HAssistant && docker compose --profile manual up kitchen-nightly
+```
+
+See [KITCHEN_NIGHTLY_QUICKSTART.md](KITCHEN_NIGHTLY_QUICKSTART.md) and [orchestrator/README.md](orchestrator/README.md) for complete documentation.
+
 ## Documentation
 
 - [Quick Start Guide](QUICK_START.md) - Fast setup walkthrough
 - [Memory Integration](MEMORY_INTEGRATION.md) - Letta-style memory system documentation
+- [Kitchen Nightly Pipeline](KITCHEN_NIGHTLY_QUICKSTART.md) - Orchestrator quick start
 - [HA Assist Setup](HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
 - [HA Voice Config](HA_VOICE_CONFIG.md) - Voice pipeline setup
 - [Wyoming Setup](WYOMING_SETUP.md) - STT/TTS service configuration
@@ -242,8 +266,13 @@ See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete documentation.
 ```
 HAssistant/
 ├── docker-compose.yml              # Service orchestration
+├── Dockerfile                      # Kitchen Stack orchestrator container
 ├── .env                            # Environment configuration
 ├── .env.example                    # Environment template
+├── orchestrator/                   # Kitchen Stack nightly pipeline
+│   ├── nightly.py                  # Main pipeline orchestrator
+│   ├── requirements.txt
+│   └── README.md                   # Orchestrator documentation
 ├── letta_bridge/                   # Memory API service
 │   ├── Dockerfile
 │   ├── main.py                     # FastAPI endpoints
@@ -266,16 +295,28 @@ HAssistant/
 ├── vision-gateway/                 # Vision processing service
 │   ├── Dockerfile
 │   └── app/main.py
+├── paprika_bridge/                 # Paprika API integration
+│   ├── kappari_client.py
+│   └── README.md
+├── db/                             # Kitchen Stack database layer
+│   ├── schema.sql
+│   ├── migrate.py
+│   └── data_access.py
+├── deals/                          # Grocery deals provider
+│   └── providers/
 ├── ha_config/                      # Home Assistant configuration
 │   ├── configuration.yaml          # Includes memory REST commands
 │   └── automations.yaml            # Memory automation examples
 ├── pi_client.py                    # Raspberry Pi voice client
 ├── pi_client.env.example           # Pi client config template
 ├── example_memory_client.py        # Python client example
+├── example_kitchen_stack.py        # Kitchen Stack database example
 ├── test_memory_integration.py      # Memory API test suite
 ├── whisper_data/                   # STT model cache (auto-downloaded)
 ├── piper_data/                     # TTS model cache (auto-downloaded)
-└── docs/                           # Setup guides
+└── data/                           # Kitchen Stack artifacts (gitignored)
+    └── artifacts/                  # Timestamped pipeline outputs
+        └── YYYY-MM-DD/             # Daily artifact directory
 ```
 
 ## GPU Configuration
