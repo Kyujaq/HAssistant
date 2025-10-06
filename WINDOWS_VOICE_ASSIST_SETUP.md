@@ -208,7 +208,7 @@ pactl set-sink-volume alsa_output.usb-YOUR_DEVICE 100%
 ```bash
 # Test Piper TTS directly to USB dongle
 echo "Hello, this is a test" | \
-docker exec -i hassistant-piper /usr/share/piper/piper \
+docker exec -i hassistant-piper-glados /usr/share/piper/piper \
   --model /data/en_US-glados-high.onnx \
   --output_file - | \
 aplay -D hw:1,0 -q -
@@ -258,7 +258,7 @@ aplay -D hw:1,0 -q -
    ```bash
    python3 pi_client.py
    # Or test with:
-   echo "Open Notepad" | docker exec -i hassistant-piper /usr/share/piper/piper \
+  echo "Open Notepad" | docker exec -i hassistant-piper-glados /usr/share/piper/piper \
      --model /data/en_US-glados-high.onnx --output_file - | aplay -D hw:1,0 -q -
    ```
 3. Windows should recognize the audio and execute commands

@@ -4,7 +4,7 @@
 
 Your Wyoming services are UP and listening:
 - **Whisper** (STT): `172.18.0.6:10300` or `hassistant-whisper:10300`
-- **Piper** (TTS): `172.18.0.5:10200` or `hassistant-piper:10200`
+- **Piper** (TTS): `172.18.0.5:10200` or `piper-glados:10200`
 
 **Note:** Wyoming protocol is WebSocket-based, NOT HTTP, so `curl` won't work - this is expected!
 
@@ -47,7 +47,7 @@ Your Wyoming services are UP and listening:
    ```
    OR:
    ```
-   Host: hassistant-piper
+   Host: piper-glados
    Port: 10200
    ```
 6. Click **SUBMIT**
@@ -115,7 +115,7 @@ Check services are running:
 ```bash
 docker ps | grep hassistant
 docker logs hassistant-whisper --tail 20
-docker logs hassistant-piper --tail 20
+docker logs hassistant-piper-glados --tail 20
 ```
 
 Both should show: `INFO:__main__:Ready`

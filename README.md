@@ -1,19 +1,56 @@
 # HAssistant - Home Assistant + Ollama Voice Assistant
 
-A complete voice assistant implementation using Home Assistant's native features, Ollama for local LLM processing, and Wyoming protocol for speech services. Features a GLaDOS-inspired personality with GPU-accelerated inference.
+A complete voice assistant implementation that layers Home Assistant's Assist API with local LLMs, memory, and automation services. The stack combines Ollama, Wyoming STT/TTS, a Letta-inspired memory bridge, and optional vision and computer control agents to deliver a GPU-accelerated GLaDOS-style experience that still plays nicely with the rest of your smart home.
 
 ## Features
 
-- **Local LLM Processing**: Ollama with GPU support (GTX 1080 Ti + GTX 1070)
-- **Voice Interaction**: Wyoming Whisper (STT) + Piper (TTS) with GLaDOS voice
-- **Raspberry Pi Client**: Wake word detection and voice processing
-- **Home Assistant Integration**: Native Assist API integration
-- **Memory System**: Letta Bridge with PostgreSQL + pgvector for contextual memory
-- **Dual GPU Support**: Automatic GPU allocation for optimal performance
-- **Multiple Models**: Switch between fast (Hermes-3 3B) and detailed (Qwen 2.5 7B) responses
-- **Context Awareness**: Redis-backed session caching for multi-turn conversations
-- **Computer Control Agent**: Vision-based automation for controlling another computer (Excel, browsers, etc.)
-- **Windows Voice Assistant Control**: Control Windows laptops via audio cable and TTS output
+- **Home Assistant Assist-first design**: Uses Assist conversations as the primary interface so responses land in HA history and automations.
+- **Local LLM processing**: Ollama chat + vision endpoints with GPU scheduling for Hermes-3, Qwen 2.5, and Qwen 2.5 VL models.
+- **Voice interaction**: Wyoming Whisper (STT) and Piper (TTS) with switchable voices including the tuned kathleen-high clarity profile for Windows Voice Control.
+- **Letta-style memory system**: FastAPI bridge backed by PostgreSQL + pgvector and Redis for semantic recall, daily briefs, and eviction policies.
+- **Conversation orchestration**: GLaDOS Orchestrator routes prompts between Hermes (personality) and Qwen (reasoning) while syncing context to memory.
+- **Qwen-Agent tooling**: Optional agent runtime wired to Letta Bridge for advanced automation and tool execution.
+- **Vision automation**: Vision Gateway + Frigate provide anchored OCR, motion triggers, and screenshot capture for the Computer Control Agent.
+- **Computer control workflows**: Automate remote desktops with PyAutoGUI, OCR, or proxy actions through Windows Voice Assistant.
+- **Raspberry Pi clients**: Wake-word capture, Assist hand-off, and optional USB-audio bridge for Windows control over 3.5mm links.
+- **Dual GPU support**: Compose file pre-allocates dedicated GPUs per workload for predictable latency.
+
+## Branch Readiness Snapshot
+
+| Branch | Status | Summary |
+|--------|--------|---------|
+| `work` | ✅ Ready for `main` | Aggregates the memory bridge, Qwen/GLaDOS orchestration, computer control, Windows voice clarity updates, and accompanying documentation. The branch is composed entirely of fast-forward merges from the feature PRs in history and is the only active branch in the repository, so it represents the canonical state to ship. |
+
+Recent merge commits show each major feature branch already collapsed into `work`, leaving no divergent histories to reconcile before promoting to `main`. See [MERGE_RECOMMENDATION.md](MERGE_RECOMMENDATION.md) for the pre-merge guidance and [POST_MERGE_REVIEW.md](POST_MERGE_REVIEW.md) for the full post-merge validation checklist.
+
+## Service Inventory
+
+| Capability | Container / Service | Purpose | Key Dependencies |
+|------------|---------------------|---------|------------------|
+| Assist + Automations | `homeassistant` | Hosts Assist API, automations, and dashboard configuration. | External `assistant_default` Docker network. |
+| Chat LLM | `ollama-chat` | Serves Hermes-3, Qwen 2.5 chat models for general dialogue. | NVIDIA GPU 0, modelfiles under `ollama/modelfiles`. |
+| Vision LLM | `ollama-vision` | Handles multimodal prompts for the Vision Gateway and computer control workflows. | NVIDIA GPU 0 (11 GB) and the Qwen2.5-VL model. |
+| Speech-to-text | `whisper` | Wyoming Whisper server with CUDA acceleration. | NVIDIA GPU 1, `whisper_data` volume. |
+| Text-to-speech | `piper-glados` | Wyoming Piper server with GLaDOS and kathleen-high voices. | NVIDIA GPU 1, `piper_data` volume. |
+| Memory API | `letta-bridge` | FastAPI bridge for tiered memory, embeddings, and briefs. | `postgres`, `redis`, `.env` secrets. |
+| Persistence | `postgres`, `redis` | Store pgvector embeddings + session cache. | `scripts/*.sql` for schema bootstrapping. |
+| Conversation router | `glados-orchestrator` | Determines when to use Hermes vs. Qwen, streams responses, syncs memory. | `ollama-chat`, `letta-bridge`. |
+| Agent runtime | `qwen-agent` | Optional advanced agent that calls tools via Letta Bridge. | `letta-bridge`, `agent_data` volume (optional). |
+| Vision ingress | `vision-gateway` | Consumes Frigate frames, performs OCR with anchors, pushes to HA. | `frigate`, `ollama-vision`, Home Assistant token. |
+| Motion capture | `frigate` | Supplies webcam motion events and snapshots to the vision stack. | NVIDIA GPU 1, USB cameras `/dev/video*`. |
+| Optional desktop automation | `computer-control-agent` (commented) | Runs PyAutoGUI + OCR tasks or relays to Windows Voice Assistant. | `vision-gateway`, `ollama-chat`, Windows voice cable setup. |
+
+These services are orchestrated through `docker-compose.yml`, and most of them can be toggled on/off depending on which capabilities you need.
+
+## System Flow Overview
+
+1. **Wake & capture**: A Raspberry Pi client or HA microphone triggers Assist, streaming audio to Wyoming Whisper.
+2. **Assist prompt**: Home Assistant forwards the transcribed prompt to the GLaDOS Orchestrator which decides whether Hermes alone can answer or whether Qwen reasoning plus Hermes personality is required.
+3. **Memory lookup**: The orchestrator and optional Qwen-Agent call the Letta Bridge to retrieve relevant memories, then persist new conversational context after replying.
+4. **Response**: Piper generates speech (optionally routed through the Windows clarity profile) which can be played locally, forwarded to the Pi client, or sent over USB audio into a Windows voice session.
+5. **Automation hooks**: Vision Gateway + Frigate monitor displays or RTSP feeds, pushing actionable events into HA or the Computer Control Agent for closed-loop automation.
+
+The architecture diagram below highlights the primary Assist → Orchestrator → Memory → Speech loop, while the service inventory shows where optional modules plug in.
 
 ## Architecture
 
@@ -79,13 +116,13 @@ docker compose ps
 
 ```bash
 # Load Hermes-3 model (fast, sarcastic)
-docker exec -it hassistant-ollama ollama create glados-hermes3 -f /root/.ollama/modelfiles/Modelfile.hermes3
+docker exec -it ollama-chat ollama create glados-hermes3 -f /root/.ollama/modelfiles/Modelfile.hermes3
 
 # Load Qwen model (detailed, analytical)
-docker exec -it hassistant-ollama ollama create glados-qwen -f /root/.ollama/modelfiles/Modelfile.qwen
+docker exec -it ollama-chat ollama create glados-qwen -f /root/.ollama/modelfiles/Modelfile.qwen
 
 # Verify models loaded
-docker exec -it hassistant-ollama ollama list
+docker exec -it ollama-chat ollama list
 ```
 
 ### 4. Configure Home Assistant
@@ -93,11 +130,11 @@ docker exec -it hassistant-ollama ollama list
 1. Navigate to **Settings → Devices & Services**
 2. Click **Add Integration** → Search for "Ollama"
 3. Configure:
-   - URL: `http://hassistant-ollama:11434`
+   - URL: `http://ollama-chat:11434`
    - Model: `glados-hermes3` or `glados-qwen`
 4. Add Wyoming services:
    - **Whisper STT**: `tcp://hassistant-whisper:10300`
-   - **Piper TTS**: `tcp://hassistant-piper:10200`
+   - **Piper TTS**: `tcp://piper-glados:10200`
 
 See [HA_ASSIST_SETUP.md](HA_ASSIST_SETUP.md) and [HA_VOICE_CONFIG.md](HA_VOICE_CONFIG.md) for detailed configuration.
 
@@ -142,7 +179,7 @@ HA_TOKEN=your_long_lived_access_token
 TIME_ZONE=America/Toronto
 
 # Ollama
-OLLAMA_HOST=http://hassistant-ollama:11434
+OLLAMA_HOST=http://ollama-chat:11434
 ```
 
 ### Available Models
@@ -389,9 +426,9 @@ Ollama automatically distributes model layers across available GPUs for optimal 
 ### Services won't start
 ```bash
 # Check service logs
-docker compose logs ollama
+docker compose logs ollama-chat
 docker compose logs whisper
-docker compose logs piper
+docker compose logs piper-glados
 
 # Verify network exists
 docker network ls | grep assistant_default
@@ -400,13 +437,13 @@ docker network ls | grep assistant_default
 ### Models not loading
 ```bash
 # Check Ollama logs
-docker logs hassistant-ollama
+docker logs ollama-chat
 
 # Verify GPU access
-docker exec hassistant-ollama nvidia-smi
+docker exec ollama-chat nvidia-smi
 
 # Manually test model
-docker exec -it hassistant-ollama ollama run glados-hermes3 "Hello"
+docker exec -it ollama-chat ollama run glados-hermes3 "Hello"
 ```
 
 ### Voice services not working

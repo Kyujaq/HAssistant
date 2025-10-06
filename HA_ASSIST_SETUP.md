@@ -158,7 +158,7 @@ If you want an even better GLaDOS voice:
 
 ### "Ollama not responding"
 - Verify Ollama container is running: `docker ps | grep ollama`
-- Check Ollama models are loaded: `docker exec hassistant-ollama ollama list`
+- Check Ollama models are loaded: `docker exec ollama-chat ollama list`
 - Test Ollama directly: `curl http://localhost:11434/api/tags`
 
 ### "Wrong voice used"

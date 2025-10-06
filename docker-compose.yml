@@ -307,7 +307,7 @@ services:
       - "11435:11434"
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
-      - NVIDIA_VISIBLE_DEVICES=1
+      - NVIDIA_VISIBLE_DEVICES=0
     volumes:
       - ollama_vision_data:/root/.ollama
       - ./ollama/modelfiles:/root/.ollama/modelfiles:ro

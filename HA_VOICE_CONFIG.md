@@ -6,7 +6,7 @@
 **You WON'T see voice options here** - it just connects to the service.
 - Settings → Devices & Services → + ADD INTEGRATION
 - Wyoming Protocol
-- Host: `172.18.0.5` or `hassistant-piper`
+- Host: `172.18.0.5` or `piper-glados`
 - Port: `10200`
 - ✅ This just adds the connection - NO voice picker yet!
 
@@ -38,7 +38,7 @@ The Piper container is configured with `--voice en_US-glados-high` by default, s
 ### Option C: Check available voices via command
 ```bash
 # See what Piper reports as available
-docker logs hassistant-piper 2>&1 | grep -i voice
+docker logs hassistant-piper-glados 2>&1 | grep -i voice
 ```
 
 ---
@@ -49,13 +49,13 @@ Test GLaDOS voice directly:
 
 ```bash
 # Test Piper with GLaDOS voice
-docker exec hassistant-piper /usr/share/piper/piper \
+docker exec hassistant-piper-glados /usr/share/piper/piper \
   --model /data/en_US-glados-high.onnx \
   --output_file /tmp/test.wav \
   "Hello, this is GLaDOS speaking"
 
 # Copy out and play
-docker cp hassistant-piper:/tmp/test.wav /tmp/glados-test.wav
+docker cp hassistant-piper-glados:/tmp/test.wav /tmp/glados-test.wav
 aplay /tmp/glados-test.wav
 ```
 
