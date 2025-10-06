@@ -342,7 +342,30 @@ services:
     restart: unless-stopped
     networks:
       - ha_network
-  
+
+  # Kitchen Stack Nightly Pipeline
+  kitchen-nightly:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kitchen-nightly
+    environment:
+      - TZ=America/Toronto
+      - DATA_DIR=/data
+      - LOG_LEVEL=INFO
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - ha_network
+    # Note: This service is designed to be run manually or via cron
+    # Remove 'restart: unless-stopped' to prevent automatic restarts
+    profiles:
+      - manual  # Use 'docker-compose --profile manual up kitchen-nightly' to run
   
   
 

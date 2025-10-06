@@ -1,0 +1,3 @@
+# Orchestrator dependencies
+# No external dependencies required for basic orchestration
+# Add specific dependencies as agents are implemented
