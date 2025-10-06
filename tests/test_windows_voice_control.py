@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Mock requests before import
 sys.modules['requests'] = MagicMock()
 
-from windows_voice_control import speak_command, test_audio_device, send_keystroke, type_text, open_application
+from clients.windows_voice_control import speak_command, test_audio_device, send_keystroke, type_text, open_application
 
 
 class TestWindowsVoiceControl(unittest.TestCase):
@@ -245,10 +245,10 @@ class TestDirectPiperMode(unittest.TestCase):
         """Test direct Piper synthesis command"""
         # Reload module to pick up USE_DIRECT_PIPER=true
         import importlib
-        import windows_voice_control
+        from clients import windows_voice_control
         importlib.reload(windows_voice_control)
         
-        from windows_voice_control import synthesize_with_piper
+        from clients.windows_voice_control import synthesize_with_piper
         
         # Mock successful Piper execution
         mock_result = Mock()
@@ -270,10 +270,10 @@ class TestDirectPiperMode(unittest.TestCase):
         self.assertIn('1.1', args)
         self.assertIn('--model', args)
     
-    @patch('windows_voice_control.subprocess.run')
+    @patch('clients.windows_voice_control.subprocess.run')
     def test_volume_adjustment_with_sox(self, mock_subprocess):
         """Test volume adjustment using sox"""
-        from windows_voice_control import adjust_audio_volume
+        from clients.windows_voice_control import adjust_audio_volume
         
         # Mock successful sox execution
         mock_result = Mock()

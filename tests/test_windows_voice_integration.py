@@ -32,7 +32,7 @@ sys.modules['PIL.Image'] = MagicMock()
 # Mock requests
 sys.modules['requests'] = MagicMock()
 
-from computer_control_agent import ComputerControlAgent
+from clients.computer_control_agent import ComputerControlAgent
 
 
 class TestWindowsVoiceIntegration(unittest.TestCase):
@@ -41,7 +41,7 @@ class TestWindowsVoiceIntegration(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures"""
         # Force disable confirmation for all tests
-        import computer_control_agent
+        from clients import computer_control_agent
         computer_control_agent.CONFIRM_BEFORE_ACTION = False
         
         os.environ['CONFIRM_BEFORE_ACTION'] = 'false'

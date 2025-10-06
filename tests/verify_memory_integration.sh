@@ -45,28 +45,28 @@ fi
 # Check 2: Letta Bridge directory and files
 echo ""
 echo "Checking Letta Bridge service..."
-if [ -d "letta_bridge" ]; then
-    check_passed "letta_bridge directory exists"
+if [ -d "services/letta-bridge" ]; then
+    check_passed "services/letta-bridge directory exists"
     
-    if [ -f "letta_bridge/main.py" ]; then
-        check_passed "letta_bridge/main.py exists"
+    if [ -f "services/letta-bridge/main.py" ]; then
+        check_passed "services/letta-bridge/main.py exists"
     else
-        check_failed "letta_bridge/main.py not found"
+        check_failed "services/letta-bridge/main.py not found"
     fi
     
-    if [ -f "letta_bridge/Dockerfile" ]; then
-        check_passed "letta_bridge/Dockerfile exists"
+    if [ -f "services/letta-bridge/Dockerfile" ]; then
+        check_passed "services/letta-bridge/Dockerfile exists"
     else
-        check_failed "letta_bridge/Dockerfile not found"
+        check_failed "services/letta-bridge/Dockerfile not found"
     fi
     
-    if [ -f "letta_bridge/requirements.txt" ]; then
-        check_passed "letta_bridge/requirements.txt exists"
+    if [ -f "services/letta-bridge/requirements.txt" ]; then
+        check_passed "services/letta-bridge/requirements.txt exists"
     else
-        check_failed "letta_bridge/requirements.txt not found"
+        check_failed "services/letta-bridge/requirements.txt not found"
     fi
 else
-    check_failed "letta_bridge directory not found"
+    check_failed "services/letta-bridge directory not found"
 fi
 
 # Check 3: Database scripts
@@ -89,35 +89,35 @@ fi
 # Check 4: Environment configuration
 echo ""
 echo "Checking environment configuration..."
-if [ -f ".env.example" ]; then
-    check_passed ".env.example exists"
+if [ -f "config/.env.example" ]; then
+    check_passed "config/.env.example exists"
     
     # Check for key environment variables in .env.example
     required_vars=("POSTGRES_PASSWORD" "LETTA_PG_URI" "REDIS_PASSWORD" "LETTA_REDIS_URL" "BRIDGE_API_KEY")
     for var in "${required_vars[@]}"; do
-        if grep -q "$var" .env.example; then
-            check_passed ".env.example contains $var"
+        if grep -q "$var" config/.env.example; then
+            check_passed "config/.env.example contains $var"
         else
-            check_failed ".env.example missing $var"
+            check_failed "config/.env.example missing $var"
         fi
     done
 else
-    check_failed ".env.example not found"
+    check_failed "config/.env.example not found"
 fi
 
 if [ -f ".env" ]; then
     check_passed ".env file exists (ready for deployment)"
 else
-    check_warning ".env file not found (copy from .env.example for deployment)"
+    check_warning ".env file not found (copy from config/.env.example for deployment)"
 fi
 
 # Check 5: Documentation
 echo ""
 echo "Checking documentation..."
-if [ -f "MEMORY_INTEGRATION.md" ]; then
-    check_passed "MEMORY_INTEGRATION.md exists"
+if [ -f "docs/architecture/MEMORY_INTEGRATION.md" ]; then
+    check_passed "docs/architecture/MEMORY_INTEGRATION.md exists"
 else
-    check_failed "MEMORY_INTEGRATION.md not found"
+    check_failed "docs/architecture/MEMORY_INTEGRATION.md not found"
 fi
 
 if [ -f "README.md" ]; then
@@ -135,16 +135,16 @@ fi
 # Check 6: Test script
 echo ""
 echo "Checking test infrastructure..."
-if [ -f "test_memory_integration.py" ]; then
-    check_passed "test_memory_integration.py exists"
+if [ -f "tests/test_memory_integration.py" ]; then
+    check_passed "tests/test_memory_integration.py exists"
     
-    if [ -x "test_memory_integration.py" ]; then
-        check_passed "test_memory_integration.py is executable"
+    if [ -x "tests/test_memory_integration.py" ]; then
+        check_passed "tests/test_memory_integration.py is executable"
     else
-        check_warning "test_memory_integration.py is not executable (chmod +x to fix)"
+        check_warning "tests/test_memory_integration.py is not executable (chmod +x to fix)"
     fi
 else
-    check_failed "test_memory_integration.py not found"
+    check_failed "tests/test_memory_integration.py not found"
 fi
 
 # Check 7: Docker Compose services
@@ -162,10 +162,10 @@ done
 # Check 8: Python dependencies in Letta Bridge
 echo ""
 echo "Checking Letta Bridge dependencies..."
-if [ -f "letta_bridge/requirements.txt" ]; then
+if [ -f "services/letta-bridge/requirements.txt" ]; then
     required_deps=("fastapi" "uvicorn" "asyncpg" "redis" "numpy")
     for dep in "${required_deps[@]}"; do
-        if grep -qi "$dep" letta_bridge/requirements.txt; then
+        if grep -qi "$dep" services/letta-bridge/requirements.txt; then
             check_passed "Letta Bridge requires $dep"
         else
             check_failed "Letta Bridge missing $dep in requirements.txt"
@@ -176,10 +176,10 @@ fi
 # Check 9: Letta Bridge API endpoints
 echo ""
 echo "Checking Letta Bridge API endpoints..."
-if [ -f "letta_bridge/main.py" ]; then
+if [ -f "services/letta-bridge/main.py" ]; then
     endpoints=("/memory/add" "/memory/search" "/memory/pin" "/memory/forget" "/daily_brief" "/healthz")
     for endpoint in "${endpoints[@]}"; do
-        if grep -q "$endpoint" letta_bridge/main.py; then
+        if grep -q "$endpoint" services/letta-bridge/main.py; then
             check_passed "Endpoint $endpoint implemented"
         else
             check_failed "Endpoint $endpoint not found"

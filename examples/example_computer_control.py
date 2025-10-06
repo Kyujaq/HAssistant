@@ -8,9 +8,9 @@ import sys
 import os
 
 # Add parent directory to path to import the agent
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from computer_control_agent import ComputerControlAgent
+from clients.computer_control_agent import ComputerControlAgent
 
 def example_screen_info():
     """Example: Get information about current screen"""
