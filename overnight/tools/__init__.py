@@ -1,10 +1,46 @@
 """
 Tools module for overnight intelligence system.
 
-TODO: This file needs to be populated with content from kyujaq/glados-assistant repository.
-The source repository is not currently accessible via GitHub API.
-
-Expected content: brain/overnight/tools/__init__.py from glados-assistant repository
+Exports all available tools for memory, calendar, and web operations.
 """
 
-# Placeholder - awaiting actual content from glados-assistant repository
+from .memory_tools import (
+    add_memory,
+    search_memories,
+    get_daily_brief,
+    pin_memory,
+    run_maintenance
+)
+
+from .calendar_tools import (
+    get_calendar_events,
+    create_calendar_event,
+    get_upcoming_events
+)
+
+from .web_tools import (
+    web_search,
+    fetch_url_content,
+    extract_main_content,
+    summarize_web_content,
+    research_topic
+)
+
+__all__ = [
+    # Memory tools
+    "add_memory",
+    "search_memories",
+    "get_daily_brief",
+    "pin_memory",
+    "run_maintenance",
+    # Calendar tools
+    "get_calendar_events",
+    "create_calendar_event",
+    "get_upcoming_events",
+    # Web tools
+    "web_search",
+    "fetch_url_content",
+    "extract_main_content",
+    "summarize_web_content",
+    "research_topic",
+]

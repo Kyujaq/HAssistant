@@ -9,6 +9,7 @@ A complete voice assistant implementation using Home Assistant's native features
 - **Raspberry Pi Client**: Wake word detection and voice processing
 - **Home Assistant Integration**: Native Assist API integration
 - **Memory System**: Letta Bridge with PostgreSQL + pgvector for contextual memory
+- **Overnight Intelligence**: Background tasks for memory consolidation and information enrichment
 - **Dual GPU Support**: Automatic GPU allocation for optimal performance
 - **Multiple Models**: Switch between fast (Hermes-3 3B) and detailed (Qwen 2.5 7B) responses
 - **Context Awareness**: Redis-backed session caching for multi-turn conversations
@@ -25,12 +26,12 @@ A complete voice assistant implementation using Home Assistant's native features
 │ Home Assistant  │  Central hub + Assist API
 └────────┬────────┘
          │
-    ┌────┴────┬─────────┐
-    │         │         │
-┌───▼───┐ ┌──▼──────┐ ┌▼──────────┐
-│Ollama │ │ Wyoming │ │Letta Bridge│  LLM + STT/TTS + Memory
-│  LLM  │ │ Services│ │ + Postgres │
-└───────┘ └─────────┘ └─────┬───────┘
+    ┌────┴────┬─────────┬──────────┐
+    │         │         │          │
+┌───▼───┐ ┌──▼──────┐ ┌▼──────────┐ ┌──▼────────┐
+│Ollama │ │ Wyoming │ │Letta Bridge│ │ Overnight │  LLM + STT/TTS + Memory + Intelligence
+│  LLM  │ │ Services│ │ + Postgres │ │   Crew    │
+└───────┘ └─────────┘ └─────┬───────┘ └───────────┘
                             │
                       ┌─────▼─────┐
                       │   Redis   │  Session cache
@@ -124,6 +125,23 @@ curl -X POST http://localhost:8081/memory/add \
 ```
 
 See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete memory system documentation.
+
+### 6. Test Overnight Intelligence (Optional)
+
+The overnight intelligence system runs background tasks for memory consolidation and enrichment:
+
+```bash
+# Test run
+docker-compose run --rm overnight-crew python -m overnight
+
+# Or use the convenience script
+./run_overnight.sh
+
+# Schedule daily (add to crontab)
+0 3 * * * cd /path/to/HAssistant && ./run_overnight.sh
+```
+
+See [OVERNIGHT_INTEGRATION.md](OVERNIGHT_INTEGRATION.md) for complete overnight system documentation.
 
 ## Configuration
 
@@ -227,10 +245,37 @@ curl "http://localhost:8081/memory/search?q=personality&k=5" \
 
 See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md) for complete documentation.
 
+## Overnight Intelligence System
+
+The overnight system runs background tasks for memory consolidation, information enrichment, and automated maintenance:
+
+### Features
+
+- **Memory Consolidation**: Analyzes and consolidates memories, generates insights
+- **Information Enrichment**: Gathers and enriches information on topics of interest
+- **Calendar Integration**: Reviews upcoming events and creates reminders
+- **Automated Maintenance**: Cleans up old memories and performs system tasks
+
+### Quick Start
+
+```bash
+# Run overnight cycle manually
+./run_overnight.sh
+
+# Or use Docker Compose directly
+docker-compose run --rm overnight-crew python -m overnight
+
+# Schedule daily via cron (3 AM)
+0 3 * * * cd /path/to/HAssistant && ./run_overnight.sh
+```
+
+See [OVERNIGHT_INTEGRATION.md](OVERNIGHT_INTEGRATION.md) for complete documentation.
+
 ## Documentation
 
 - [Quick Start Guide](QUICK_START.md) - Fast setup walkthrough
 - [Memory Integration](MEMORY_INTEGRATION.md) - Letta-style memory system documentation
+- [Overnight Intelligence](OVERNIGHT_INTEGRATION.md) - Background task system documentation
 - [HA Assist Setup](HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
 - [HA Voice Config](HA_VOICE_CONFIG.md) - Voice pipeline setup
 - [Wyoming Setup](WYOMING_SETUP.md) - STT/TTS service configuration
@@ -263,6 +308,21 @@ HAssistant/
 │   └── requirements.txt
 ├── qwen-agent/                     # AI orchestration service
 │   └── Dockerfile
+├── overnight/                      # Overnight intelligence system
+│   ├── Dockerfile
+│   ├── __main__.py                 # Entry point
+│   ├── orchestrator.py             # Main orchestration
+│   ├── schemas.py                  # Data models
+│   ├── artifacts.py                # Artifact management
+│   ├── guards.py                   # Safety and validation
+│   ├── crews/                      # Task crews
+│   │   ├── information_enrichment.py
+│   │   └── memory_consolidation.py
+│   ├── tools/                      # Integration tools
+│   │   ├── memory_tools.py         # Letta Bridge integration
+│   │   ├── calendar_tools.py       # HA Calendar integration
+│   │   └── web_tools.py            # Web research
+│   └── requirements.txt
 ├── vision-gateway/                 # Vision processing service
 │   ├── Dockerfile
 │   └── app/main.py
@@ -271,7 +331,9 @@ HAssistant/
 │   └── automations.yaml            # Memory automation examples
 ├── pi_client.py                    # Raspberry Pi voice client
 ├── pi_client.env.example           # Pi client config template
-├── example_memory_client.py        # Python client example
+├── example_memory_client.py        # Memory API client example
+├── example_overnight_client.py     # Overnight system client example
+├── run_overnight.sh                # Overnight cycle runner script
 ├── test_memory_integration.py      # Memory API test suite
 ├── whisper_data/                   # STT model cache (auto-downloaded)
 ├── piper_data/                     # TTS model cache (auto-downloaded)

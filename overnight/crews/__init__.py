@@ -1,10 +1,13 @@
 """
 Crews module for overnight intelligence system.
 
-TODO: This file needs to be populated with content from kyujaq/glados-assistant repository.
-The source repository is not currently accessible via GitHub API.
-
-Expected content: brain/overnight/crews/__init__.py from glados-assistant repository
+Exports all available crews for overnight operations.
 """
 
-# Placeholder - awaiting actual content from glados-assistant repository
+from .information_enrichment import InformationEnrichmentCrew
+from .memory_consolidation import MemoryConsolidationCrew
+
+__all__ = [
+    "InformationEnrichmentCrew",
+    "MemoryConsolidationCrew",
+]
