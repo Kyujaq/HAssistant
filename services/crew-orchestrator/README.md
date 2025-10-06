@@ -137,14 +137,14 @@ The service is designed to integrate with external services:
 ### Integration Notes
 
 **Current Implementation Status:**
-- Both tool integrations are **placeholders** waiting for proper implementation
-- The VoiceCommandTool needs to invoke `windows_voice_control.py` script directly or wrap it in a service
-- The VisionVerificationTool needs adaptation to use vision-gateway's tracking capabilities rather than Q&A
+- Voice commands are routed through the shared `WindowsVoiceExecutor`, which attempts to call the Windows
+  Voice Control HTTP service and gracefully falls back to the local Python implementation
+- Vision verification questions are answered using live data from the `vision-gateway` service, leveraging its
+  meeting invite detection and button press heuristics
 
-**Recommended Implementation Path:**
-1. Create a simple FastAPI wrapper around `windows_voice_control.py` with a `/speak` endpoint
-2. Extend vision-gateway with a Q&A endpoint using the OLLAMA vision model already configured
-3. Update the tool implementations to use these endpoints
+**Recommended Next Steps:**
+1. Expand the vision heuristics to cover additional UI validation scenarios
+2. Persist verification transcripts for later review
 
 ## Development
 
@@ -194,8 +194,8 @@ curl -X POST http://localhost:8084/crew/excel/kickoff \
 - ✅ Logging
 
 ### In Progress / TODO
-- ⚠️ **Windows Voice Control Integration**: Placeholder implementation needs connection to actual service
-- ⚠️ **Vision Gateway Integration**: Placeholder implementation needs connection to actual service
+- ✅ **Windows Voice Control Integration**: Shared executor calls the HTTP service and falls back to the local bridge
+- ✅ **Vision Gateway Integration**: Verification tool consumes live detections from `vision-gateway`
 - ⚠️ **Full Task Execution**: Currently only plans tasks, needs execution loop
 - ⚠️ **Task History**: Store and retrieve past executions
 - ⚠️ **Progress Tracking**: Real-time updates on task progress

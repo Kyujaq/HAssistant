@@ -6,12 +6,20 @@ voice command and vision verification systems.
 """
 
 import os
-import time
+import sys
 import logging
-from typing import Type, Optional
+from pathlib import Path
+from typing import Type
 from crewai_tools import BaseTool
 from pydantic import BaseModel, Field, validator
-import requests
+
+# Ensure repository root is available for shared helpers
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.append(str(REPO_ROOT))
+
+from shared.voice import WindowsVoiceExecutor
+from shared.vision import VisionGatewayClient
 
 # Logging
 logger = logging.getLogger("crew-orchestrator.tools")
@@ -19,6 +27,9 @@ logger = logging.getLogger("crew-orchestrator.tools")
 # Configuration
 WINDOWS_VOICE_CONTROL_URL = os.getenv("WINDOWS_VOICE_CONTROL_URL", "http://localhost:8085")
 VISION_GATEWAY_URL = os.getenv("VISION_GATEWAY_URL", "http://vision-gateway:8088")
+
+_voice_executor = WindowsVoiceExecutor(base_url=WINDOWS_VOICE_CONTROL_URL)
+_vision_client = VisionGatewayClient(base_url=VISION_GATEWAY_URL)
 
 
 class VoiceCommandInput(BaseModel):
@@ -58,37 +69,22 @@ class VoiceCommandTool(BaseTool):
             Status message indicating the command was executed
         """
         try:
-            # Validate command
             if not command or not command.strip():
                 error_msg = "Voice command cannot be empty"
                 logger.error(error_msg)
                 return f"Error: {error_msg}"
-            
+
             command = command.strip()
-            logger.info(f"[VOICE TOOL] Speaking: '{command}'")
-            
-            # TODO: Implement actual integration with windows_voice_control service
-            # Uncomment and test when service is available:
-            # try:
-            #     response = requests.post(
-            #         f"{WINDOWS_VOICE_CONTROL_URL}/speak",
-            #         json={"text": command},
-            #         timeout=10
-            #     )
-            #     if response.status_code == 200:
-            #         return f"Voice command executed successfully: '{command}'"
-            #     else:
-            #         error_msg = f"Voice command failed: {response.text}"
-            #         logger.error(error_msg)
-            #         return error_msg
-            # except requests.RequestException as e:
-            #     error_msg = f"Voice command connection error: {str(e)}"
-            #     logger.error(error_msg)
-            #     return error_msg
-            
-            # Placeholder implementation for now
-            return f"Voice command executed: '{command}'"
-            
+            logger.info(f"[VOICE TOOL] Executing voice command: '{command}'")
+
+            success, message = _voice_executor.speak(command)
+            if success:
+                return message
+
+            error_msg = f"Voice command failed: {message}"
+            logger.error(error_msg)
+            return error_msg
+
         except Exception as e:
             error_msg = f"Voice command error: {str(e)}"
             logger.error(error_msg, exc_info=True)
@@ -132,40 +128,31 @@ class VisionVerificationTool(BaseTool):
             The answer from the vision system (yes/no)
         """
         try:
-            # Validate question
             if not question or not question.strip():
                 error_msg = "Verification question cannot be empty"
                 logger.error(error_msg)
                 return f"Error: {error_msg}"
-            
+
             question = question.strip()
-            logger.info(f"[VISION TOOL] Verifying: '{question}'")
-            
-            # TODO: Implement actual integration with vision-gateway service
-            # Uncomment and test when service is available:
-            # try:
-            #     response = requests.post(
-            #         f"{VISION_GATEWAY_URL}/query",
-            #         json={"question": question},
-            #         timeout=30
-            #     )
-            #     if response.status_code == 200:
-            #         result = response.json()
-            #         answer = result.get("answer", "Unknown")
-            #         return f"Vision verification: '{question}' - {answer}"
-            #     else:
-            #         error_msg = f"Vision verification failed: {response.text}"
-            #         logger.error(error_msg)
-            #         return error_msg
-            # except requests.RequestException as e:
-            #     error_msg = f"Vision verification connection error: {str(e)}"
-            #     logger.error(error_msg)
-            #     return error_msg
-            
-            # Placeholder implementation - simulate verification delay
-            time.sleep(2)
-            return f"Vision verification: '{question}' - Yes (placeholder)"
-            
+            logger.info(f"[VISION TOOL] Verifying screen state: '{question}'")
+
+            result = _vision_client.answer_question(question)
+            answer = result.get("answer", "Unknown")
+            reason = result.get("reason", "")
+
+            detection = result.get("detection") or {}
+            detection_details = detection.get("result", {}).get("vl", {})
+            extra_context = []
+            if detection_details.get("title"):
+                extra_context.append(f"title={detection_details['title']}")
+            if detection_details.get("action_state"):
+                extra_context.append(f"state={detection_details['action_state']}")
+            if detection_details.get("confidence") is not None:
+                extra_context.append(f"confidence={detection_details['confidence']:.2f}")
+
+            context_str = f" ({', '.join(extra_context)})" if extra_context else ""
+            return f"Vision verification: '{question}' -> {answer}. {reason}{context_str}"
+
         except Exception as e:
             error_msg = f"Vision verification error: {str(e)}"
             logger.error(error_msg, exc_info=True)
