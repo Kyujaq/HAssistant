@@ -194,6 +194,27 @@ services:
     networks:
       - ha_network
 
+  # Overnight Intelligence System - Background tasks and memory consolidation
+  overnight-crew:
+    build:
+      context: ./overnight
+      dockerfile: Dockerfile
+    container_name: hassistant-overnight-crew
+    environment:
+      - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8000
+      - BRIDGE_API_KEY=${BRIDGE_API_KEY:-d6DkfuU7zPOpcoeAVabiNNPhTH6TcFrZ}
+      - HA_BASE_URL=http://homeassistant:8123
+      - HA_TOKEN=${HA_TOKEN}
+      - ARTIFACTS_DIR=/data/artifacts
+    volumes:
+      - overnight_data:/data
+    depends_on:
+      - letta-bridge
+      - homeassistant
+    restart: "no"  # Run manually or via cron/scheduler
+    networks:
+      - ha_network
+
   # ---- Vision Gateway (CPU heavy, light GPU use unless you enable GPU OCR) ----
   vision-gateway:
     build:
@@ -337,6 +358,8 @@ volumes:
   ollama_chat_data:
     driver: local
   ollama_vision_data:
+    driver: local
+  overnight_data:
     driver: local
 
 networks:
