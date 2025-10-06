@@ -211,8 +211,14 @@ services:
       # Direct HDMI capture from UGREEN dongle
       - HDMI_ENABLED=true
       - HDMI_DEVICE=/dev/video2
-      - HDMI_FPS=20
-      - HDMI_RESIZE_LONG=2560  # Full native resolution, no downscaling
+      - HDMI_WIDTH=1920
+      - HDMI_HEIGHT=1080
+      - HDMI_CAP_FPS=12
+      - HDMI_FORCE_MJPG=false
+      # scan resolution
+      #- SCAN_WIDTH=960
+      #- SCAN_HEIGHT=540
+      - MATCH_EVERY_N=2  
       # Motion & debounce
       - MOTION_THRESHOLD=0.015
       - COOLDOWN_SECONDS=8
@@ -220,6 +226,17 @@ services:
       - OCR_MODE=anchor_based  # anchor_based or full_screen
       - ANCHOR_KEYWORDS=Accept,Send,Join,Decline  # Action buttons only (removed Meeting,Invite to reduce false positives)
       - CONTEXT_ZONES_ENABLED=true
+      - BUTTON_COORDS=45,350,90,114
+      - BUTTON_THRESH=0.40
+      - PRESSED_THRESH=0.55
+      - PRESS_MARGIN=0.04
+      - MIN_PRESSED=0.50
+      - DISAPPEAR_THRESH=0.35
+      - DISAPPEAR_FRAMES=3
+      - PRESS_TIMEOUT_S=3.0
+      - REARM_COOLDOWN=1.5
+      - HDMI_RESIZE_LONG=1280
+
     volumes:
       - ./vision-gateway/cache:/app/cache
       - ./vision-gateway/app/assets:/app/assets:ro   # <-- host ./assets → container /app/assets, read-only
