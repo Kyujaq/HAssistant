@@ -13,7 +13,7 @@ import numpy as np
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from computer_control_agent import ComputerControlAgent
+from clients.computer_control_agent import ComputerControlAgent
 
 
 class TestComputerControlAgent(unittest.TestCase):

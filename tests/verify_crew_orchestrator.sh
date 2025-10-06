@@ -8,7 +8,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-CREW_DIR="$SCRIPT_DIR/crew-orchestrator"
+CREW_DIR="$SCRIPT_DIR/../services/crew-orchestrator"
 
 passed=0
 failed=0
@@ -37,9 +37,9 @@ echo ""
 # Check 1: Directory structure
 echo "Checking directory structure..."
 if [ -d "$CREW_DIR" ]; then
-    check_passed "crew-orchestrator directory exists"
+    check_passed "services/crew-orchestrator directory exists"
 else
-    check_failed "crew-orchestrator directory not found"
+    check_failed "services/crew-orchestrator directory not found"
     exit 1
 fi
 
