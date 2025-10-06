@@ -32,7 +32,7 @@ A complete voice assistant implementation that layers Home Assistant's Assist AP
 |--------|--------|---------|
 | `work` | ✅ Ready for `main` | Aggregates the memory bridge, Qwen/GLaDOS orchestration, computer control, Windows voice clarity updates, and accompanying documentation. The branch is composed entirely of fast-forward merges from the feature PRs in history and is the only active branch in the repository, so it represents the canonical state to ship. |
 
-Recent merge commits show each major feature branch already collapsed into `work`, leaving no divergent histories to reconcile before promoting to `main`. See [MERGE_RECOMMENDATION.md](MERGE_RECOMMENDATION.md) for the latest branch review and promotion guidance.
+Recent merge commits show each major feature branch already collapsed into `work`, leaving no divergent histories to reconcile before promoting to `main`.
 
 ## Service Inventory
 
