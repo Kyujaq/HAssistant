@@ -106,3 +106,8 @@ ha_config/.storage/
 ha_config/.cloud/
 ha_config/deps/
 ha_config/tts/
+
+# SQLite databases (Kitchen Stack inventory)
+inventory.sqlite
+inventory.sqlite-shm
+inventory.sqlite-wal
