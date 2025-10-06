@@ -497,13 +497,16 @@ def healthz():
 def get_recent_detections():
     return recent_detections
 
+# Store latest frames per source
+latest_frames: Dict[str, Dict[str, Any]] = {}  # source -> {"image_b64": str, "timestamp": float}
+
 @app.get("/api/latest_frame/{source}")
 def get_latest_frame(source: str):
     """
     Get the latest frame from a specific source
     
     Args:
-        source: Source name (e.g., "hdmi", "local")
+        source: Source name (e.g., "frigate_hdmi", "hdmi", "local")
     
     Returns:
         JSON with base64-encoded image and timestamp
@@ -517,6 +520,8 @@ def get_latest_frame(source: str):
         "timestamp": frame_data["timestamp"],
         "source": source
     }
+
+from fastapi.responses import HTMLResponse
 
 @app.get("/debug")
 def debug_page():

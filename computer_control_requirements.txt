@@ -1,0 +1,17 @@
+# Computer Control Agent Requirements
+
+# Core automation
+pyautogui>=0.9.54
+pynput>=1.7.6
+
+# Image processing and OCR
+Pillow>=10.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+pytesseract>=0.3.10
+
+# HTTP and utilities
+requests>=2.31.0
+
+# Home Assistant integration (optional)
+flask>=3.0.0

@@ -193,6 +193,7 @@ See `examples/` directory for automation templates!
 3. **Create automations** - Morning briefings, reminders, etc.
 4. **Mobile app** - Use HA Companion app for voice anywhere
 5. **Node-RED** - Visual automation programming
+6. **Windows Voice Control** - Control Windows laptop via audio cable (see [WINDOWS_VOICE_ASSIST_SETUP.md](WINDOWS_VOICE_ASSIST_SETUP.md))
 
 ---
 
@@ -203,6 +204,8 @@ You now have:
 - 🧠 **AI brain** via Ollama (local, GPU-accelerated)
 - 🔊 **Voice output** via Piper TTS
 - 🏠 **Smart home control** via Home Assistant
+- 💻 **Computer control** via vision-based agent
+- 🪟 **Windows control** via audio cable (optional)
 - 🔒 **100% local** - no cloud dependencies
 
 **All running on your own hardware with your GPUs!**

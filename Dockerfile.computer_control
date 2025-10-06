@@ -1,0 +1,46 @@
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    scrot \
+    xvfb \
+    x11vnc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements
+COPY computer_control_requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r computer_control_requirements.txt
+
+# Copy agent code
+COPY computer_control_agent.py .
+COPY computer_control_agent.env.example .
+
+# Create config directory
+RUN mkdir -p /config
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV DISPLAY=:99
+
+# Default to confirmation mode for safety
+ENV CONFIRM_BEFORE_ACTION=true
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python3 -c "import computer_control_agent; print('OK')" || exit 1
+
+# Entry point
+ENTRYPOINT ["python3", "computer_control_agent.py"]
+CMD ["--help"]

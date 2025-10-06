@@ -343,8 +343,32 @@ services:
     networks:
       - ha_network
   
-  
-  
+  # Computer Control Agent (optional, for remote computer automation)
+  # Uncomment to enable computer control capabilities
+  # computer-control-agent:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.computer_control
+  #   container_name: hassistant-computer-control
+  #   environment:
+  #     - VISION_GATEWAY_URL=http://vision-gateway:8088
+  #     - OLLAMA_URL=http://ollama-chat:11434
+  #     - OLLAMA_MODEL=qwen3:4b-instruct-2507-q4_K_M
+  #     - HA_URL=http://homeassistant:8123
+  #     - HA_TOKEN=${HA_TOKEN}
+  #     - CONFIRM_BEFORE_ACTION=true
+  #     - MAX_ACTIONS_PER_TASK=50
+  #   volumes:
+  #     - ./computer_control_agent.env:/app/computer_control_agent.env
+  #     - /tmp/.X11-unix:/tmp/.X11-unix  # For X11 forwarding
+  #   depends_on:
+  #     - vision-gateway
+  #     - ollama-chat
+  #   restart: unless-stopped
+  #   networks:
+  #     - ha_network
+
+
 
 volumes:
   postgres_data:
