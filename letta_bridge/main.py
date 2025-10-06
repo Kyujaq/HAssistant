@@ -14,9 +14,9 @@ import numpy as np
 # --------------------
 # ENV & CONFIG
 # --------------------
-PG_DSN = os.getenv("LETTA_PG_URI", "postgresql://hassistant:hassistant_secure_password_change_me@hassistant-postgres:5432/hassistant")
-REDIS_URL = os.getenv("LETTA_REDIS_URL", "redis://:hassistant_redis_password_change_me@hassistant-redis:6379/0")
-API_KEY = os.getenv("BRIDGE_API_KEY", "dev-key")  # set a real key in prod
+PG_DSN = os.getenv("LETTA_PG_URI", "postgresql://hassistant:CHANGE_ME_STRONG_PASSWORD_REQUIRED@hassistant-postgres:5432/hassistant")
+REDIS_URL = os.getenv("LETTA_REDIS_URL", "redis://:CHANGE_ME_STRONG_PASSWORD_REQUIRED@hassistant-redis:6379/0")
+API_KEY = os.getenv("BRIDGE_API_KEY", "dev-key")  # SECURITY: Change in production! Set BRIDGE_API_KEY in .env
 EMBED_DIM = int(os.getenv("EMBED_DIM", "1536"))    # match your pgvector dim (1536 for ada-002)
 DAILY_BRIEF_WINDOW_HOURS = int(os.getenv("DAILY_BRIEF_WINDOW_HOURS", "24"))
 
