@@ -205,6 +205,10 @@ LETTA_REDIS_URL=redis://:password@hassistant-redis:6379/0
 BRIDGE_API_KEY=secure_random_api_key
 EMBED_DIM=1536
 DAILY_BRIEF_WINDOW_HOURS=24
+
+# Shared automation clients
+VISION_GATEWAY_URL=http://vision-gateway:8088
+WINDOWS_VOICE_CONTROL_URL=http://windows-voice-control:8085
 ```
 
 ## Deployment

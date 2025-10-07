@@ -5,6 +5,8 @@ Sends commands to Windows laptop via audio cable and Piper TTS
 
 This script allows you to control a Windows laptop using Windows Voice Assistant
 by routing TTS audio through a USB audio dongle connected via 3.5mm aux cable.
+It also acts as the local fallback for the shared `shared.voice.WindowsVoiceExecutor`
+helper that higher-level services use when an HTTP bridge is not available.
 
 Usage:
     python3 windows_voice_control.py "Open Notepad"

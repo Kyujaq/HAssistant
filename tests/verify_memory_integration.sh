@@ -93,7 +93,15 @@ if [ -f "config/.env.example" ]; then
     check_passed "config/.env.example exists"
     
     # Check for key environment variables in .env.example
-    required_vars=("POSTGRES_PASSWORD" "LETTA_PG_URI" "REDIS_PASSWORD" "LETTA_REDIS_URL" "BRIDGE_API_KEY")
+    required_vars=(
+        "POSTGRES_PASSWORD"
+        "LETTA_PG_URI"
+        "REDIS_PASSWORD"
+        "LETTA_REDIS_URL"
+        "BRIDGE_API_KEY"
+        "VISION_GATEWAY_URL"
+        "WINDOWS_VOICE_CONTROL_URL"
+    )
     for var in "${required_vars[@]}"; do
         if grep -q "$var" config/.env.example; then
             check_passed "config/.env.example contains $var"

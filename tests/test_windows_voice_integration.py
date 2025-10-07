@@ -55,46 +55,42 @@ class TestWindowsVoiceIntegration(unittest.TestCase):
     
     def test_agent_initialization_direct_mode(self):
         """Test agent initializes in direct control mode"""
-        agent = ComputerControlAgent(use_windows_voice=False)
+        agent = ComputerControlAgent(use_windows_voice=False, vision_client=MagicMock())
         self.assertFalse(agent.use_windows_voice)
         self.assertIsNone(agent.windows_voice_bridge)
     
     @unittest.skip("Requires complex mock setup")
-    @patch('computer_control_agent.speak_command')
-    @patch('computer_control_agent.type_text')
-    @patch('computer_control_agent.send_keystroke')
-    @patch('computer_control_agent.open_application')
-    def test_agent_initialization_windows_voice_mode(self, mock_open, mock_key, mock_type, mock_speak):
+    @patch('clients.computer_control_agent.get_windows_voice_bridge')
+    def test_agent_initialization_windows_voice_mode(self, mock_bridge):
         """Test agent initializes in Windows Voice mode"""
-        # Mock the imports
-        with patch.dict('sys.modules', {
-            'windows_voice_control': MagicMock(
-                speak_command=mock_speak,
-                type_text=mock_type,
-                send_keystroke=mock_key,
-                open_application=mock_open
-            )
-        }):
-            agent = ComputerControlAgent(use_windows_voice=True)
-            self.assertTrue(agent.use_windows_voice)
-            self.assertIsNotNone(agent.windows_voice_bridge)
+        mock_bridge.return_value = {
+            'speak_command': MagicMock(),
+            'type_text': MagicMock(),
+            'send_keystroke': MagicMock(),
+            'open_application': MagicMock(),
+        }
+
+        agent = ComputerControlAgent(use_windows_voice=True, vision_client=MagicMock())
+        self.assertTrue(agent.use_windows_voice)
+        self.assertIsNotNone(agent.windows_voice_bridge)
     
     def test_windows_voice_env_variable(self):
         """Test USE_WINDOWS_VOICE environment variable"""
         os.environ['USE_WINDOWS_VOICE'] = 'true'
-        
+
         # Reload module to pick up env var
         import importlib
-        import computer_control_agent
-        importlib.reload(computer_control_agent)
-        
+        with patch('clients.computer_control_agent.VisionGatewayClient'):
+            import clients.computer_control_agent as computer_control_agent
+            importlib.reload(computer_control_agent)
+
         self.assertTrue(computer_control_agent.USE_WINDOWS_VOICE)
     
     def test_execute_action_via_windows_voice_type(self):
         """Test typing action via Windows Voice"""
         mock_type_text = Mock(return_value=True)
         
-        agent = ComputerControlAgent(use_windows_voice=False)
+        agent = ComputerControlAgent(use_windows_voice=False, vision_client=MagicMock())
         agent.use_windows_voice = True
         agent.windows_voice_bridge = {
             'type_text': mock_type_text,
@@ -118,7 +114,7 @@ class TestWindowsVoiceIntegration(unittest.TestCase):
         """Test keystroke action via Windows Voice"""
         mock_send_keystroke = Mock(return_value=True)
         
-        agent = ComputerControlAgent(use_windows_voice=False)
+        agent = ComputerControlAgent(use_windows_voice=False, vision_client=MagicMock())
         agent.use_windows_voice = True
         agent.windows_voice_bridge = {
             'type_text': Mock(),
@@ -142,7 +138,7 @@ class TestWindowsVoiceIntegration(unittest.TestCase):
         """Test hotkey action via Windows Voice"""
         mock_speak_command = Mock(return_value=True)
         
-        agent = ComputerControlAgent(use_windows_voice=False)
+        agent = ComputerControlAgent(use_windows_voice=False, vision_client=MagicMock())
         agent.use_windows_voice = True
         agent.windows_voice_bridge = {
             'type_text': Mock(),
@@ -166,7 +162,7 @@ class TestWindowsVoiceIntegration(unittest.TestCase):
         """Test scroll action via Windows Voice"""
         mock_speak_command = Mock(return_value=True)
         
-        agent = ComputerControlAgent(use_windows_voice=False)
+        agent = ComputerControlAgent(use_windows_voice=False, vision_client=MagicMock())
         agent.use_windows_voice = True
         agent.windows_voice_bridge = {
             'type_text': Mock(),
@@ -194,7 +190,7 @@ class TestWindowsVoiceIntegration(unittest.TestCase):
     
     def test_execute_action_via_windows_voice_wait(self):
         """Test wait action via Windows Voice"""
-        agent = ComputerControlAgent(use_windows_voice=False)
+        agent = ComputerControlAgent(use_windows_voice=False, vision_client=MagicMock())
         agent.use_windows_voice = True
         agent.windows_voice_bridge = {
             'type_text': Mock(),

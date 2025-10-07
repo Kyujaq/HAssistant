@@ -232,6 +232,10 @@ Checks include:
 - Healthchecks
 ```
 
+## Shared Integration Variables
+
+The verification script now enforces the presence of the cross-service variables `VISION_GATEWAY_URL` and `WINDOWS_VOICE_CONTROL_URL` in `.env`. These values keep the memory tooling aligned with the automation agents that depend on the shared vision and voice clients.
+
 ## Next Steps
 
 After deployment:

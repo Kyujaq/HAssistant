@@ -13,6 +13,18 @@ import numpy as np
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Mock heavy dependencies before importing the agent module
+mock_pyautogui = MagicMock()
+mock_pyautogui.FAILSAFE = True
+mock_pyautogui.PAUSE = 0.5
+sys.modules['pyautogui'] = mock_pyautogui
+sys.modules['pytesseract'] = MagicMock()
+sys.modules['cv2'] = MagicMock()
+sys.modules['numpy'] = MagicMock()
+sys.modules['PIL'] = MagicMock()
+sys.modules['PIL.Image'] = MagicMock()
+sys.modules['requests'] = MagicMock()
+
 from clients.computer_control_agent import ComputerControlAgent
 
 
@@ -24,16 +36,33 @@ class TestComputerControlAgent(unittest.TestCase):
         # Mock environment variables
         os.environ['CONFIRM_BEFORE_ACTION'] = 'false'
         os.environ['MAX_ACTIONS_PER_TASK'] = '10'
-        
+
+        # Patch VisionGatewayClient to avoid real HTTP usage
+        self.vision_patcher = patch('clients.computer_control_agent.VisionGatewayClient')
+        self.mock_vision_cls = self.vision_patcher.start()
+        self.mock_vision = self.mock_vision_cls.return_value
+
+        import clients.computer_control_agent as computer_control_agent
+        computer_control_agent.CONFIRM_BEFORE_ACTION = False
+        computer_control_agent.MAX_ACTIONS_PER_TASK = 10
+
+        self.input_patcher = patch('builtins.input', return_value='y')
+        self.input_patcher.start()
+
+    def tearDown(self):
+        """Stop patches"""
+        self.vision_patcher.stop()
+        self.input_patcher.stop()
+
     def test_agent_initialization(self):
         """Test agent initializes correctly"""
         agent = ComputerControlAgent()
         self.assertEqual(agent.action_count, 0)
         self.assertEqual(agent.task_history, [])
-    
-    @patch('computer_control_agent.pyautogui')
-    @patch('computer_control_agent.cv2')
-    @patch('computer_control_agent.np')
+
+    @patch('clients.computer_control_agent.pyautogui')
+    @patch('clients.computer_control_agent.cv2')
+    @patch('clients.computer_control_agent.np')
     def test_get_screenshot_local(self, mock_np, mock_cv2, mock_pyautogui):
         """Test local screenshot capture"""
         # Mock screenshot
@@ -48,7 +77,7 @@ class TestComputerControlAgent(unittest.TestCase):
         self.assertIsNotNone(screenshot)
         mock_pyautogui.screenshot.assert_called_once()
     
-    @patch('computer_control_agent.pyautogui')
+    @patch('clients.computer_control_agent.pyautogui')
     def test_execute_action_click(self, mock_pyautogui):
         """Test click action execution"""
         agent = ComputerControlAgent()
@@ -65,7 +94,7 @@ class TestComputerControlAgent(unittest.TestCase):
         mock_pyautogui.click.assert_called_once_with(100, 200, clicks=1, button='left')
         self.assertEqual(agent.action_count, 1)
     
-    @patch('computer_control_agent.pyautogui')
+    @patch('clients.computer_control_agent.pyautogui')
     def test_execute_action_type(self, mock_pyautogui):
         """Test type action execution"""
         agent = ComputerControlAgent()
@@ -82,7 +111,7 @@ class TestComputerControlAgent(unittest.TestCase):
         mock_pyautogui.write.assert_called_once_with("Hello World", interval=0.05)
         self.assertEqual(agent.action_count, 1)
     
-    @patch('computer_control_agent.pyautogui')
+    @patch('clients.computer_control_agent.pyautogui')
     def test_execute_action_hotkey(self, mock_pyautogui):
         """Test hotkey action execution"""
         agent = ComputerControlAgent()
@@ -98,7 +127,7 @@ class TestComputerControlAgent(unittest.TestCase):
         self.assertTrue(result)
         mock_pyautogui.hotkey.assert_called_once_with("ctrl", "c")
     
-    @patch('computer_control_agent.time.sleep')
+    @patch('clients.computer_control_agent.time.sleep')
     def test_execute_action_wait(self, mock_sleep):
         """Test wait action execution"""
         agent = ComputerControlAgent()
@@ -143,9 +172,9 @@ class TestComputerControlAgent(unittest.TestCase):
         
         self.assertFalse(result)
     
-    @patch('computer_control_agent.pytesseract')
-    @patch('computer_control_agent.Image')
-    @patch('computer_control_agent.cv2')
+    @patch('clients.computer_control_agent.pytesseract')
+    @patch('clients.computer_control_agent.Image')
+    @patch('clients.computer_control_agent.cv2')
     def test_ocr_screenshot(self, mock_cv2, mock_Image, mock_pytesseract):
         """Test OCR functionality"""
         mock_cv2.cvtColor.return_value = np.zeros((100, 100, 3), dtype=np.uint8)
@@ -158,7 +187,7 @@ class TestComputerControlAgent(unittest.TestCase):
         
         self.assertEqual(text, "Sample text")
     
-    @patch('computer_control_agent.requests.post')
+    @patch('clients.computer_control_agent.requests.post')
     def test_ask_llm(self, mock_post):
         """Test LLM interaction"""
         mock_response = Mock()
@@ -172,10 +201,10 @@ class TestComputerControlAgent(unittest.TestCase):
         self.assertEqual(response, "Test response")
         mock_post.assert_called_once()
     
-    @patch('computer_control_agent.pytesseract')
-    @patch('computer_control_agent.Image')
-    @patch('computer_control_agent.cv2')
-    @patch('computer_control_agent.pyautogui')
+    @patch('clients.computer_control_agent.pytesseract')
+    @patch('clients.computer_control_agent.Image')
+    @patch('clients.computer_control_agent.cv2')
+    @patch('clients.computer_control_agent.pyautogui')
     def test_find_text_on_screen(self, mock_pyautogui, mock_cv2, mock_Image, mock_pytesseract):
         """Test finding text on screen"""
         # Mock screenshot
@@ -199,9 +228,9 @@ class TestComputerControlAgent(unittest.TestCase):
         self.assertIsNotNone(coords)
         self.assertEqual(coords, (75, 20))  # 50 + 50/2, 10 + 20/2
     
-    @patch('computer_control_agent.pyautogui')
-    @patch('computer_control_agent.cv2')
-    @patch('computer_control_agent.np')
+    @patch('clients.computer_control_agent.pyautogui')
+    @patch('clients.computer_control_agent.cv2')
+    @patch('clients.computer_control_agent.np')
     def test_get_screen_info(self, mock_np, mock_cv2, mock_pyautogui):
         """Test getting screen information"""
         # Mock screenshot
@@ -220,12 +249,22 @@ class TestComputerControlAgent(unittest.TestCase):
 
 class TestActionTypes(unittest.TestCase):
     """Test different action types"""
-    
+
     def setUp(self):
         os.environ['CONFIRM_BEFORE_ACTION'] = 'false'
         os.environ['MAX_ACTIONS_PER_TASK'] = '10'
+
+        import clients.computer_control_agent as computer_control_agent
+        computer_control_agent.CONFIRM_BEFORE_ACTION = False
+        computer_control_agent.MAX_ACTIONS_PER_TASK = 10
+
+        self.input_patcher = patch('builtins.input', return_value='y')
+        self.input_patcher.start()
+
+    def tearDown(self):
+        self.input_patcher.stop()
     
-    @patch('computer_control_agent.pyautogui')
+    @patch('clients.computer_control_agent.pyautogui')
     def test_double_click(self, mock_pyautogui):
         """Test double click action"""
         agent = ComputerControlAgent()
@@ -235,7 +274,7 @@ class TestActionTypes(unittest.TestCase):
         
         mock_pyautogui.doubleClick.assert_called_once_with(100, 100)
     
-    @patch('computer_control_agent.pyautogui')
+    @patch('clients.computer_control_agent.pyautogui')
     def test_right_click(self, mock_pyautogui):
         """Test right click action"""
         agent = ComputerControlAgent()
@@ -245,7 +284,7 @@ class TestActionTypes(unittest.TestCase):
         
         mock_pyautogui.rightClick.assert_called_once_with(100, 100)
     
-    @patch('computer_control_agent.pyautogui')
+    @patch('clients.computer_control_agent.pyautogui')
     def test_move(self, mock_pyautogui):
         """Test mouse move action"""
         agent = ComputerControlAgent()
@@ -255,7 +294,7 @@ class TestActionTypes(unittest.TestCase):
         
         mock_pyautogui.moveTo.assert_called_once_with(500, 500, duration=1.0)
     
-    @patch('computer_control_agent.pyautogui')
+    @patch('clients.computer_control_agent.pyautogui')
     def test_press(self, mock_pyautogui):
         """Test key press action"""
         agent = ComputerControlAgent()
@@ -265,7 +304,7 @@ class TestActionTypes(unittest.TestCase):
         
         mock_pyautogui.press.assert_called_once_with("enter")
     
-    @patch('computer_control_agent.pyautogui')
+    @patch('clients.computer_control_agent.pyautogui')
     def test_scroll(self, mock_pyautogui):
         """Test scroll action"""
         agent = ComputerControlAgent()

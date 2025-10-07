@@ -59,6 +59,9 @@ scp user@glad0s:/home/qjaq/HAssistant/pi_client.env.example ~/.env
 
 # Edit configuration
 nano ~/.env
+
+# Optional: align with shared automation services
+echo "WINDOWS_VOICE_CONTROL_URL=http://windows-voice-control:8085" >> ~/.env
 ```
 
 Set your:
