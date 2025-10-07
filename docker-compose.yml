@@ -177,7 +177,7 @@ services:
       environment:
         - OLLAMA_BASE_URL=http://ollama-chat:11434
         - QWEN_MODEL=qwen3:4b-instruct-2507-q4_K_M
-        - HERMES_MODEL=glados-hermes3
+        - HERMES_MODEL=hermes3
         - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8000 # Corrected port
         - LETTA_API_KEY=${BRIDGE_API_KEY:-dev-key}
         - PORT=8082
@@ -188,8 +188,7 @@ services:
         - letta-bridge
       restart: unless-stopped
       healthcheck:
-        # THE REAL FIX: Use wget instead of curl, as curl is not installed.
-        test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8082/healthz"]
+        test: ["CMD", "curl", "-f", "http://localhost:8082/healthz"]
         interval: 30s
         timeout: 10s
         retries: 5

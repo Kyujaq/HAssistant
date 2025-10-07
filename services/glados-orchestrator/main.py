@@ -346,6 +346,33 @@ async def ollama_chat(request: Dict[str, Any]):
         "created_at": "2025-10-04T00:00:00Z",
         "message": response.choices[0]["message"],
         "done": True
+    }@app.post("/v1/api/chat")
+@app.post("/api/chat")
+async def ollama_chat(request: Dict[str, Any]):
+    """Ollama-compatible /api/chat endpoint"""
+    # Convert Ollama format to OpenAI format
+    messages = [Message(**msg) for msg in request.get("messages", [])]
+    openai_request = ChatCompletionRequest(
+        model=request.get("model", "glados"),
+        messages=messages,
+        temperature=request.get("options", {}).get("temperature", 0.7),
+        stream=request.get("stream", False)
+    )
+
+    # Process through the proper OpenAI-compatible endpoint
+    response = await chat_completion(openai_request)
+
+    # THE FIX: Check if the response is a stream and return it directly.
+    # The Ollama integration in Home Assistant understands OpenAI-compatible streams.
+    if isinstance(response, StreamingResponse):
+        return response
+
+    # If not streaming, convert the response back to Ollama format
+    return {
+        "model": request.get("model", "glados"),
+        "created_at": "2025-10-04T00:00:00Z", # This is a placeholder
+        "message": response.choices[0]["message"],
+        "done": True
     }
 
 async def generate_stream(
@@ -378,32 +405,34 @@ async def generate_stream(
         error_msg = f"data: {json.dumps({'error': str(e)})}\n\n"
         yield error_msg
 
-@app.post("/v1/chat/completions")
-async def chat_completion(request: ChatCompletionRequest):
-    """OpenAI-compatible chat completion endpoint (supports streaming)"""
+@app.post("/v1/api/chat")
+@app.post("/api/chat")
+async def ollama_chat(request: Dict[str, Any]):
+    """Ollama-compatible /api/chat endpoint"""
+    # Convert Ollama format to OpenAI format
+    messages = [Message(**msg) for msg in request.get("messages", [])]
+    openai_request = ChatCompletionRequest(
+        model=request.get("model", "glados"),
+        messages=messages,
+        temperature=request.get("options", {}).get("temperature", 0.7),
+        stream=request.get("stream", False)
+    )
 
-    if not request.messages:
-        raise HTTPException(status_code=400, detail="No messages provided")
+    # Process through the proper OpenAI-compatible endpoint
+    response = await chat_completion(openai_request)
 
-    # Get the user's query
-    user_query = request.messages[-1].content
+    # THE FIX: Check if the response is a stream and return it directly.
+    # The Ollama integration in Home Assistant understands OpenAI-compatible streams.
+    if isinstance(response, StreamingResponse):
+        return response
 
-    # Log incoming request
-    logger.info(f"Incoming request - Messages: {len(request.messages)}, Query: {user_query[:100]}...")
-    for i, msg in enumerate(request.messages):
-        logger.debug(f"  Message {i}: {msg.role} - {msg.content[:100]}...")
-
-    # Detect complexity
-    complexity = detect_complexity(user_query)
-    logger.info(f"Detected complexity: {complexity.value}")
-
-    # Handle streaming vs non-streaming
-    if request.stream:
-        logger.info("Streaming response requested")
-        return StreamingResponse(
-            generate_stream(request.messages, request.temperature or 0.7, user_query, complexity),
-            media_type="text/event-stream"
-        )
+    # If not streaming, convert the response back to Ollama format
+    return {
+        "model": request.get("model", "glados"),
+        "created_at": "2025-10-04T00:00:00Z", # This is a placeholder
+        "message": response.choices[0]["message"],
+        "done": True
+    }
 
     # Non-streaming response
     try:
@@ -457,7 +486,7 @@ async def list_models():
         ]
     }
 
-@app.get("/healthz")
+@app.api_route("/healthz", methods=["GET", "HEAD"])
 async def health_check():
     """Health check endpoint (checks Ollama and models availability)"""
     health_status = {

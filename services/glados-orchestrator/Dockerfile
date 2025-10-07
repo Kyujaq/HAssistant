@@ -1,9 +1,10 @@
 # Use a slim Python base image
 FROM python:3.11-slim
 
-# THE FIX: Install curl so the healthcheck command can run
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
+# Install wget for the Docker healthcheck and curl for debugging
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget curl \
+    && rm -rf /var/lib/apt/lists/*
 # Set the working directory
 WORKDIR /app
 
