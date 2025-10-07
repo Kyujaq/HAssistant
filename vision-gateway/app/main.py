@@ -1,4 +1,5 @@
 import os, re, time, threading, base64
+from collections import deque
 from typing import List, Dict, Any, Tuple
 
 import numpy as np
@@ -43,8 +44,10 @@ BUTTON_COORDS = os.getenv("BUTTON_COORDS", "45,350,90,114")  # x,y,w,h
 BUTTON_THRESH    = float(os.getenv("BUTTON_THRESH", "0.40"))  # arming on idle "send"
 PRESSED_THRESH   = float(os.getenv("PRESSED_THRESH", "0.55")) # absolute backstop for pressed
 DISAPPEAR_THRESH = float(os.getenv("DISAPPEAR_THRESH", "0.35"))
-PRESS_MARGIN     = float(os.getenv("PRESS_MARGIN", "0.04"))   # pressed - idle >= margin
-MIN_PRESSED      = float(os.getenv("MIN_PRESSED", "0.50"))    # ignore very low pressed
+PRESS_DELTA      = float(os.getenv("PRESS_DELTA", "0.07"))    # how much better "press" must be than "send"
+
+# Once pressed, require scores to fall this far below PRESSED_THRESH before releasing
+PRESS_RELEASE = max(0.0, PRESSED_THRESH - 0.18)
 
 # Debounce / timing
 DISAPPEAR_FRAMES = int(os.getenv("DISAPPEAR_FRAMES", "3"))    # frames to confirm end
@@ -284,11 +287,14 @@ def hdmi_loop():
 
     # Debouncers / timers
     seen_send = 0
-    seen_press = 0
     seen_disappear = 0
     no_button = 0
     pressed_ts = 0.0
     frame_i = 0
+
+    # Running score history (for temporal median filtering)
+    press_scores: deque = deque(maxlen=5)
+    send_scores: deque = deque(maxlen=5)
 
     print("[hdmi] State: SCANNING (native-ROI scan, full-res snapshot on press; masked matching)", flush=True)
 
@@ -328,11 +334,8 @@ def hdmi_loop():
             time.sleep(delay); continue
         roi_gray = _prep_gray(roi)
 
-        # Only run matchers every N frames to keep CPU low
-        should_match = (frame_i % MATCH_EVERY_N == 0)
-
         if state == "SCANNING":
-            if not should_match or send_t is None:
+            if (frame_i % MATCH_EVERY_N != 0) or send_t is None:
                 time.sleep(delay); continue
 
             score_g = _match_max(roi_gray, send_t)
@@ -352,13 +355,10 @@ def hdmi_loop():
 
             if seen_send >= 2:
                 state = "ARMED"
-                seen_press = 0
+                press_scores.clear(); send_scores.clear()
                 print(f"[hdmi] ✅ ARMED @ fixed region (native {bx},{by},{bw},{bh}) score={score:.3f}", flush=True)
 
         elif state == "ARMED":
-            if not should_match or press_t is None:
-                time.sleep(delay); continue
-
             ps_g = _match_max(roi_gray, press_t)
             ps_m = _match_max_masked(roi_gray, press_t, press_m)
             pscore = max(ps_g, ps_m)
@@ -367,28 +367,38 @@ def hdmi_loop():
             ss_m = _match_max_masked(roi_gray, send_t, send_m) if send_t is not None else -1.0
             sscore = max(ss_g, ss_m)
 
+            press_scores.append(pscore)
+            send_scores.append(sscore)
+
+            press_med = float(np.median(list(press_scores))) if press_scores else pscore
+            send_med = float(np.median(list(send_scores))) if send_scores else sscore
+            inst_delta = (pscore - sscore) if send_t is not None else float("inf")
+
             # Auto-dearm if both weak for a while (window hidden)
-            weak_both = (pscore < (PRESSED_THRESH - 0.10)) and (sscore < (BUTTON_THRESH - 0.10))
+            weak_both = (press_med < (PRESSED_THRESH - 0.10)) and (send_med < (BUTTON_THRESH - 0.10))
             no_button = (no_button + 1) if weak_both else 0
             if no_button >= 15:
                 print("[hdmi] ↩︎ Button gone (window minimized/closed) — de-arming", flush=True)
                 state = "SCANNING"
-                seen_send = seen_press = seen_disappear = 0
+                seen_send = seen_disappear = 0
                 no_button = 0
+                press_scores.clear(); send_scores.clear()
+                time.sleep(delay)
+                continue
 
-            # Relative press condition (or absolute backstop)
-            looks_pressed_abs = (pscore >= PRESSED_THRESH)
-            pressed_wins      = (pscore >= MIN_PRESSED) and (pscore - sscore >= PRESS_MARGIN)
-            if looks_pressed_abs or pressed_wins:
-                seen_press += 1
-            else:
-                seen_press = 0
+            delta = press_med - send_med if send_t is not None else float("inf")
+            looks_pressed = (
+                (press_med >= PRESSED_THRESH)
+                and (delta >= PRESS_DELTA)
+                and (inst_delta >= max(0.0, PRESS_DELTA * 0.6))
+            )
 
-            if frame_i % (MATCH_EVERY_N*10) == 0:
-                print(f"[hdmi][armed] p(g={ps_g:.3f},m={ps_m:.3f})={pscore:.3f}  "
-                      f"s(g={ss_g:.3f},m={ss_m:.3f})={sscore:.3f}  Δ={pscore-sscore:.3f}", flush=True)
+            if frame_i % 20 == 0:
+                print(f"[hdmi][armed] med_p={press_med:.3f} med_s={send_med:.3f} "
+                      f"p(g={ps_g:.3f},m={ps_m:.3f})={pscore:.3f}  "
+                      f"s(g={ss_g:.3f},m={ss_m:.3f})={sscore:.3f}", flush=True)
 
-            if seen_press >= 2:
+            if looks_pressed:
                 # Take a full-res snapshot, then go to PRESS
                 full = _grab_fullres_snapshot(cap, prefer_mjpg=prefer_mjpg,
                                               nat_w=CAP_WIDTH, nat_h=CAP_HEIGHT, fps=CAP_FPS_REQ)
@@ -396,7 +406,14 @@ def hdmi_loop():
                 state = "PRESS"
                 pressed_ts = time.time()
                 seen_disappear = 0
-                print(f"[hdmi] 🖱️ PRESS p={pscore:.3f} s={sscore:.3f} Δ={pscore-sscore:.3f}", flush=True)
+                # Keep the running history warm for PRESS state
+                press_scores.append(pscore)
+                send_scores.append(sscore)
+                print(
+                    f"[hdmi] 🖱️ PRESS p={pscore:.3f} s={sscore:.3f} Δ={pscore-sscore:.3f} "
+                    f"medΔ={delta:.3f}",
+                    flush=True,
+                )
 
                 # Qwen-only context (no OCR)
                 shot_ds = downscale_keep_long(screenshot, HDMI_RESIZE_LONG)
@@ -437,11 +454,23 @@ def hdmi_loop():
                 _match_max_masked(roi_gray, press_t, press_m) if press_t is not None else -1.0
             )
 
+            press_scores.append(pscore)
+            send_scores.append(sscore)
+            press_med = float(np.median(list(press_scores))) if press_scores else pscore
+            send_med = float(np.median(list(send_scores))) if send_scores else sscore
+            inst_delta = (pscore - sscore) if send_t is not None else float("inf")
+
             flat    = (_roi_variance(roi_gray) < FLAT_VAR)
             timeout = (time.time() - pressed_ts) > PRESS_TIMEOUT_S
 
-            cond_disappear = (send_t is None) or (sscore < DISAPPEAR_THRESH)
-            cond_unpress   = (press_t is None) or (pscore < (PRESSED_THRESH - 0.10))
+            cond_disappear = (send_t is None) or (send_med < DISAPPEAR_THRESH)
+            delta = press_med - send_med if send_t is not None else float("inf")
+            cond_unpress   = (
+                (press_t is None)
+                or (press_med <= PRESS_RELEASE)
+                or (delta <= (PRESS_DELTA * 0.5))
+                or (inst_delta <= (PRESS_DELTA * 0.25))
+            )
 
             if cond_disappear or cond_unpress or flat or timeout:
                 seen_disappear += 1
@@ -454,7 +483,8 @@ def hdmi_loop():
 
             if seen_disappear >= DISAPPEAR_FRAMES:
                 state = "SCANNING"
-                seen_send = seen_press = seen_disappear = no_button = 0
+                seen_send = seen_disappear = no_button = 0
+                press_scores.clear(); send_scores.clear()
                 print(f"[hdmi] ✅ Cycle complete; re-arming", flush=True)
                 time.sleep(REARM_COOLDOWN)
 

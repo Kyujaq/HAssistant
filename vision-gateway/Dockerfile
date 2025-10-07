@@ -14,5 +14,9 @@ RUN pip install --upgrade pip \
  && pip install -r /app/requirements.txt
 
 COPY app /app/app
+
+# Fail fast during build if the FastAPI app has syntax errors.
+RUN python -m compileall /app/app/main.py
+
 EXPOSE 8088
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8088"]
