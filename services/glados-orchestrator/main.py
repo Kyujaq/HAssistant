@@ -37,7 +37,7 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama-chat:11434")
 QWEN_MODEL = os.getenv("QWEN_MODEL", "glados-qwen")
 HERMES_MODEL = os.getenv("HERMES_MODEL", "glados-hermes3")
 LETTA_BRIDGE_URL = os.getenv("LETTA_BRIDGE_URL", "http://hassistant-letta-bridge:8081")
-LETTA_API_KEY = os.getenv("LETTA_API_KEY", "d6DkfuU7zPOpcoeAVabiNNPhTH6TcFrZ")
+LETTA_API_KEY = os.getenv("LETTA_API_KEY", "change-me-to-secure-key")
 PORT = int(os.getenv("PORT", "8082"))
 
 app = FastAPI(title="GLaDOS Orchestrator", version="1.0.0")

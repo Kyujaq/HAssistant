@@ -120,6 +120,9 @@ Edit the configuration file:
 
 ```bash
 nano ~/.env
+
+# Optional: align voice bridge with automation services
+echo "WINDOWS_VOICE_CONTROL_URL=http://windows-voice-control:8085" >> ~/.env
 ```
 
 **Set these values:**

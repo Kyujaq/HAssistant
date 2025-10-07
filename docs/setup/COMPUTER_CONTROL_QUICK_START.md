@@ -42,6 +42,11 @@ cp computer_control_agent.env.example computer_control_agent.env
 nano computer_control_agent.env
 ```
 
+Key environment variables:
+
+- `VISION_GATEWAY_URL` – HTTP endpoint for screenshots from the Vision Gateway service (defaults to `http://vision-gateway:8088`).
+- `WINDOWS_VOICE_CONTROL_URL` – Optional HTTP bridge for routing actions through Windows Voice Control. Set this when running the agent in voice mode.
+
 ## First Test (2 minutes)
 
 ### Test 1: Check Installation

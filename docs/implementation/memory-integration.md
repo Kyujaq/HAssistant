@@ -230,6 +230,15 @@ curl http://localhost:8081/healthz
 docker exec -it hassistant-postgres psql -U hassistant -d hassistant -c "SELECT COUNT(*) FROM memory_blocks;"
 ```
 
+## Shared Integration Variables
+
+The memory stack now shares configuration with automation agents. Ensure `.env` includes:
+
+- `VISION_GATEWAY_URL` so verification scripts can confirm the vision service endpoint that feeds memories.
+- `WINDOWS_VOICE_CONTROL_URL` so downstream agents that replay memories via voice can use the shared HTTP bridge.
+
+The `tests/verify_memory_integration.sh` helper checks for these variables in addition to the database settings.
+
 ## References
 
 - **Main Documentation**: [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md)

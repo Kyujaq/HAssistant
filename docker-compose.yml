@@ -328,6 +328,9 @@ services:
     networks:
       - ha_network
     restart: unless-stopped
+    environment:
+      - WINDOWS_VOICE_CONTROL_URL=http://windows-voice-control:8085
+      - VISION_GATEWAY_URL=http://vision-gateway:8088
 
   # Computer Control Agent (optional, for remote computer automation)
   # Uncomment to enable computer control capabilities

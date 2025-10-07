@@ -23,7 +23,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 # Shared integration helpers
-from shared.voice import get_windows_voice_bridge
+from shared.voice import WindowsVoiceExecutor, get_windows_voice_bridge
 from shared.vision import VisionGatewayClient
 
 # Computer control libraries
@@ -64,24 +64,34 @@ pyautogui.PAUSE = 0.5  # Pause between actions for safety
 class ComputerControlAgent:
     """Agent that can control a computer using vision and AI"""
 
-    def __init__(self, use_windows_voice=None):
+    def __init__(
+        self,
+        use_windows_voice: Optional[bool] = None,
+        vision_client: Optional[VisionGatewayClient] = None,
+        voice_executor: Optional[WindowsVoiceExecutor] = None,
+    ):
         self.action_count = 0
         self.task_history = []
-        
+
         # Use parameter if provided, otherwise use environment variable
         if use_windows_voice is None:
             use_windows_voice = USE_WINDOWS_VOICE
-        
+
         self.use_windows_voice = use_windows_voice
+        self.voice_executor = voice_executor
         self.windows_voice_bridge = None
-        self.vision_client = VisionGatewayClient(VISION_GATEWAY_URL)
+        self.vision_client = vision_client or VisionGatewayClient(VISION_GATEWAY_URL)
 
         if use_windows_voice:
-            bridge = get_windows_voice_bridge()
+            if voice_executor:
+                bridge = get_windows_voice_bridge(voice_executor)
+            else:
+                bridge = get_windows_voice_bridge()
             if bridge:
                 self.windows_voice_bridge = bridge
+                backend_hint = "custom executor" if voice_executor else "default executor"
                 logger.info("🤖 Computer Control Agent initialized (Windows Voice Mode)")
-                logger.info("   Windows voice backend ready for command execution")
+                logger.info("   Windows voice backend ready for command execution (%s)", backend_hint)
             else:
                 logger.warning("Windows voice control backend unavailable, falling back to direct control")
                 self.use_windows_voice = False

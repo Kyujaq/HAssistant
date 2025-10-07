@@ -28,6 +28,7 @@ HA_URL = os.getenv('HA_URL', 'http://assistant-ha:8123')
 HA_TOKEN = os.getenv('HA_TOKEN')
 TTS_URL = os.getenv('TTS_URL', 'http://hassistant-tts:8004')
 WAKE_WORD_MODEL = os.getenv('WAKE_WORD_MODEL', 'computer')  # or path to .ppn file
+HA_ASSIST_TIMEOUT = float(os.getenv('HA_ASSIST_TIMEOUT', '10'))
 
 # Audio settings
 SAMPLE_RATE = 16000
@@ -196,7 +197,7 @@ class GLaDOSPiClient:
                 audio_data = f.read()
 
             # Send to STT
-            response = requests.post(url, headers=headers, data=audio_data, timeout=10)
+            response = requests.post(url, headers=headers, data=audio_data, timeout=HA_ASSIST_TIMEOUT)
 
             if response.status_code != 200:
                 logger.error(f"STT failed: {response.status_code} - {response.text}")
@@ -233,7 +234,7 @@ class GLaDOSPiClient:
                 "conversation_id": str(uuid.uuid4())
             }
 
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            response = requests.post(url, headers=headers, json=payload, timeout=HA_ASSIST_TIMEOUT)
 
             if response.status_code != 200:
                 logger.error(f"Conversation failed: {response.status_code}")

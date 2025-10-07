@@ -12,6 +12,26 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from clients.computer_control_agent import ComputerControlAgent
 
+
+def example_voice_mode():
+    """Example: Route actions through Windows Voice Control"""
+    print("\n=== Example 0: Windows Voice Control ===")
+    print("This example assumes the Windows voice HTTP bridge is running.")
+    os.environ.setdefault("USE_WINDOWS_VOICE", "true")
+
+    agent = ComputerControlAgent(use_windows_voice=True)
+    if not agent.use_windows_voice:
+        print("Windows voice backend unavailable – falling back to direct control")
+        return
+
+    action = {
+        "type": "type",
+        "params": {"text": "Hello from HAssistant"},
+        "description": "Speak typing command through Windows voice",
+    }
+    success = agent.execute_action(action)
+    print(f" Voice command dispatched: {'✓' if success else '✗'}")
+
 def example_screen_info():
     """Example: Get information about current screen"""
     print("\n=== Example 1: Get Screen Info ===")
@@ -105,6 +125,7 @@ def main():
     
     try:
         # Safe examples that won't affect the system
+        example_voice_mode()
         example_screen_info()
         example_simple_actions()
         example_find_text()

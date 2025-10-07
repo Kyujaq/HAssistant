@@ -16,7 +16,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Mock requests before import
 sys.modules['requests'] = MagicMock()
 
-from clients.windows_voice_control import speak_command, test_audio_device, send_keystroke, type_text, open_application
+from clients.windows_voice_control import (
+    speak_command,
+    test_audio_device as invoke_test_audio_device,
+    send_keystroke,
+    type_text,
+    open_application,
+)
 
 
 class TestWindowsVoiceControl(unittest.TestCase):
@@ -37,10 +43,10 @@ class TestWindowsVoiceControl(unittest.TestCase):
             if key in os.environ:
                 del os.environ[key]
     
-    @patch('windows_voice_control.requests')
-    @patch('windows_voice_control.subprocess.run')
-    @patch('windows_voice_control.os.remove')
-    @patch('windows_voice_control.os.path.exists')
+    @patch('clients.windows_voice_control.requests')
+    @patch('clients.windows_voice_control.subprocess.run')
+    @patch('clients.windows_voice_control.os.remove')
+    @patch('clients.windows_voice_control.os.path.exists')
     @patch('builtins.open', new_callable=mock_open)
     def test_speak_command_success(self, mock_file, mock_exists, mock_remove, mock_subprocess, mock_requests):
         """Test successful voice command"""
@@ -67,7 +73,7 @@ class TestWindowsVoiceControl(unittest.TestCase):
         # At least one remove call for the temp file
         self.assertTrue(mock_remove.call_count >= 1)
     
-    @patch('windows_voice_control.requests')
+    @patch('clients.windows_voice_control.requests')
     def test_speak_command_tts_failure(self, mock_requests):
         """Test handling TTS service failure"""
         # Mock failed HTTP response
@@ -79,7 +85,7 @@ class TestWindowsVoiceControl(unittest.TestCase):
         
         self.assertFalse(result)
     
-    @patch('windows_voice_control.subprocess.run')
+    @patch('clients.windows_voice_control.subprocess.run')
     def test_test_audio_device_alsa(self, mock_subprocess):
         """Test audio device testing with ALSA"""
         os.environ['USE_PULSEAUDIO'] = 'false'
@@ -89,12 +95,12 @@ class TestWindowsVoiceControl(unittest.TestCase):
             stdout="card 1: Device [USB Audio Device]"
         )
         
-        result = test_audio_device("hw:1,0")
+        result = invoke_test_audio_device("hw:1,0")
         
         self.assertTrue(result)
         mock_subprocess.assert_called_once()
     
-    @patch('windows_voice_control.speak_command')
+    @patch('clients.windows_voice_control.speak_command')
     def test_send_keystroke(self, mock_speak):
         """Test sending keystroke command"""
         mock_speak.return_value = True
@@ -104,7 +110,7 @@ class TestWindowsVoiceControl(unittest.TestCase):
         self.assertTrue(result)
         mock_speak.assert_called_once_with("Press Enter")
     
-    @patch('windows_voice_control.speak_command')
+    @patch('clients.windows_voice_control.speak_command')
     def test_type_text(self, mock_speak):
         """Test typing text command"""
         mock_speak.return_value = True
@@ -114,7 +120,7 @@ class TestWindowsVoiceControl(unittest.TestCase):
         self.assertTrue(result)
         mock_speak.assert_called_once_with("Type Hello World")
     
-    @patch('windows_voice_control.speak_command')
+    @patch('clients.windows_voice_control.speak_command')
     def test_open_application(self, mock_speak):
         """Test opening application command"""
         mock_speak.return_value = True
@@ -140,16 +146,17 @@ class TestEnvironmentConfiguration(unittest.TestCase):
         
         # Reload module to pick up new env
         import importlib
-        import windows_voice_control
+        from clients import windows_voice_control
+
         importlib.reload(windows_voice_control)
-        
+
         self.assertEqual(windows_voice_control.USB_AUDIO_DEVICE, 'hw:2,0')
 
 
 class TestCommandConstruction(unittest.TestCase):
     """Test command construction"""
     
-    @patch('windows_voice_control.speak_command')
+    @patch('clients.windows_voice_control.speak_command')
     def test_keystroke_formatting(self, mock_speak):
         """Test keystroke command formatting"""
         mock_speak.return_value = True
@@ -160,7 +167,7 @@ class TestCommandConstruction(unittest.TestCase):
         send_keystroke("Escape")
         mock_speak.assert_called_with("Press Escape")
     
-    @patch('windows_voice_control.speak_command')
+    @patch('clients.windows_voice_control.speak_command')
     def test_type_text_formatting(self, mock_speak):
         """Test text typing command formatting"""
         mock_speak.return_value = True
@@ -168,7 +175,7 @@ class TestCommandConstruction(unittest.TestCase):
         type_text("user@example.com")
         mock_speak.assert_called_with("Type user@example.com")
     
-    @patch('windows_voice_control.speak_command')
+    @patch('clients.windows_voice_control.speak_command')
     def test_open_app_formatting(self, mock_speak):
         """Test application open command formatting"""
         mock_speak.return_value = True
@@ -180,7 +187,7 @@ class TestCommandConstruction(unittest.TestCase):
 class TestErrorHandling(unittest.TestCase):
     """Test error handling"""
     
-    @patch('windows_voice_control.requests')
+    @patch('clients.windows_voice_control.requests')
     def test_connection_error(self, mock_requests):
         """Test handling of connection errors"""
         import requests
@@ -190,7 +197,7 @@ class TestErrorHandling(unittest.TestCase):
         
         self.assertFalse(result)
     
-    @patch('windows_voice_control.requests')
+    @patch('clients.windows_voice_control.requests')
     def test_timeout_error(self, mock_requests):
         """Test handling of timeout errors"""
         import requests
@@ -200,8 +207,8 @@ class TestErrorHandling(unittest.TestCase):
         
         self.assertFalse(result)
     
-    @patch('windows_voice_control.requests')
-    @patch('windows_voice_control.subprocess.run')
+    @patch('clients.windows_voice_control.requests')
+    @patch('clients.windows_voice_control.subprocess.run')
     @patch('builtins.open', new_callable=mock_open)
     def test_audio_playback_failure(self, mock_file, mock_subprocess, mock_requests):
         """Test handling of audio playback failures"""
@@ -238,16 +245,16 @@ class TestDirectPiperMode(unittest.TestCase):
             if key in os.environ:
                 del os.environ[key]
     
-    @patch('windows_voice_control.subprocess.run')
-    @patch('windows_voice_control.os.path.exists')
-    @patch('windows_voice_control.os.remove')
+    @patch('clients.windows_voice_control.subprocess.run')
+    @patch('clients.windows_voice_control.os.path.exists')
+    @patch('clients.windows_voice_control.os.remove')
     def test_direct_piper_synthesis(self, mock_remove, mock_exists, mock_subprocess):
         """Test direct Piper synthesis command"""
         # Reload module to pick up USE_DIRECT_PIPER=true
         import importlib
         from clients import windows_voice_control
         importlib.reload(windows_voice_control)
-        
+
         from clients.windows_voice_control import synthesize_with_piper
         
         # Mock successful Piper execution

@@ -39,6 +39,9 @@ echo "USB_AUDIO_DEVICE=hw:1,0" >> .env
 # Enable clearer voice for Windows (recommended)
 echo "USE_DIRECT_PIPER=true" >> .env
 
+# Expose optional HTTP bridge for automation services
+echo "WINDOWS_VOICE_CONTROL_URL=http://windows-voice-control:8085" >> .env
+
 # Load environment
 source .env
 ```
