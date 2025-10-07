@@ -94,13 +94,13 @@ services:
     environment:
       - POSTGRES_DB=hassistant
       - POSTGRES_USER=hassistant
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-CHANGE_ME_STRONG_PASSWORD_REQUIRED}
+      - POSTGRES_PASSWORD=Achp8^m|lY4m]fOxd?U3T6uTd$5Y3£XA7m_b
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts:/docker-entrypoint-initdb.d:ro
     ports:
-      - "5433:5432"  # Use 5433 to avoid conflict with /assistant postgres
+      - "5432:5432"  # Use 5433 to avoid conflict with /assistant postgres
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hassistant -d hassistant"]
@@ -114,7 +114,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: hassistant-redis
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-CHANGE_ME_STRONG_PASSWORD_REQUIRED}
+    command: redis-server --appendonly yes --requirepass :gp9U0%o5>~Y1~'@Ntz528B(.£L4N,Qq59eE
     volumes:
       - redis_data:/data
     ports:
@@ -142,7 +142,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "x-api-key: ${BRIDGE_API_KEY:-dev-key}", "http://localhost:8081/healthz"]
+      test: ["CMD", "curl", "-f", "-H", "x-api-key: d6DkfuU7zPOpcoeAVabiNNPhTH6TcFrZ:-dev-key}", "http://localhost:8081/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -150,12 +150,12 @@ services:
     networks:
       - ha_network
 
-  # Qwen-Agent for AI orchestration
-  qwen-agent:
+  # PC Control Agent for AI orchestration
+  pc-control-agent:
     build:
-      context: ./services/qwen-agent
+      context: ./services/pc-control-agent
       dockerfile: Dockerfile
-    container_name: hassistant-qwen-agent
+    container_name: hassistant-pc-control
     env_file: .env
     depends_on:
       - letta-bridge
@@ -423,7 +423,12 @@ services:
     volumes:
       - compreface_db_storage:/var/lib/postgresql/data
     networks:
-      - ha_network 
+      - ha_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d compreface_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5    
   
   # Computer Control Agent (optional, for remote computer automation)
   # Uncomment to enable computer control capabilities
@@ -461,7 +466,7 @@ volumes:
     driver: local
   ollama_vision_data:
     driver: local
-    piper_data:
+  piper_data:
   whisper_data:
   ha_config:
   mosquitto_config:
