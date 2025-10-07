@@ -94,7 +94,7 @@ services:
     environment:
       - POSTGRES_DB=hassistant
       - POSTGRES_USER=hassistant
-      - POSTGRES_PASSWORD=Achp8^m|lY4m]fOxd?U3T6uTd$5Y3£XA7m_b
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -134,15 +134,17 @@ services:
     container_name: hassistant-letta-bridge
     env_file: .env
     restart: unless-stopped
+    # FIX 1: Map the host port 8081 to the container's internal port 8000
     ports:
-      - "8081:8081"  # Fixed: Map to correct internal port
+      - "8081:8000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "x-api-key: d6DkfuU7zPOpcoeAVabiNNPhTH6TcFrZ:-dev-key}", "http://localhost:8081/healthz"]
+      # FIX 2: The healthcheck must use the internal port 8000
+      test: ["CMD", "curl", "-f", "-H", "x-api-key: ${BRIDGE_API_KEY:-dev-key}", "http://localhost:8000/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -151,48 +153,49 @@ services:
       - ha_network
 
   # PC Control Agent for AI orchestration
-  pc-control-agent:
-    build:
-      context: ./services/pc-control-agent
-      dockerfile: Dockerfile
-    container_name: hassistant-pc-control
-    env_file: .env
-    depends_on:
-      - letta-bridge
-    restart: unless-stopped
-    networks:
-      - ha_network
+ # pc-control-agent:
+  #  build:
+   #   context: ./services/pc-control-agent
+    #  dockerfile: Dockerfile
+   # container_name: hassistant-pc-control
+   # env_file: .env
+   # depends_on:
+   #   - letta-bridge
+   # restart: unless-stopped
+   # networks:
+   #   - ha_network
     # Optional: mount your data/tools/configs
-    volumes:
-      - ./agent_data:/data
+   # volumes:
+   #   - ./agent_data:/data
 
   # GLaDOS Orchestrator - Routes queries between Qwen (brain) and Hermes (personality)
   glados-orchestrator:
-    build:
-      context: ./services/glados-orchestrator
-      dockerfile: Dockerfile
-    container_name: hassistant-glados-orchestrator
-    environment:
-      - OLLAMA_BASE_URL=http://ollama-chat:11434
-      - QWEN_MODEL=qwen3:4b-instruct-2507-q4_K_M
-      - HERMES_MODEL=glados-hermes3
-      - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8081
-      - LETTA_API_KEY=${BRIDGE_API_KEY:-dev-key}
-      - PORT=8082
-    ports:
-      - "8082:8082"
-    depends_on:
-      - ollama-chat
-      - letta-bridge
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    networks:
-      - ha_network
+      build:
+        context: ./services/glados-orchestrator
+        dockerfile: Dockerfile
+      container_name: hassistant-glados-orchestrator
+      environment:
+        - OLLAMA_BASE_URL=http://ollama-chat:11434
+        - QWEN_MODEL=qwen3:4b-instruct-2507-q4_K_M
+        - HERMES_MODEL=glados-hermes3
+        - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8000 # Corrected port
+        - LETTA_API_KEY=${BRIDGE_API_KEY:-dev-key}
+        - PORT=8082
+      ports:
+        - "8082:8082"
+      depends_on:
+        - ollama-chat
+        - letta-bridge
+      restart: unless-stopped
+      healthcheck:
+        # THE REAL FIX: Use wget instead of curl, as curl is not installed.
+        test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8082/healthz"]
+        interval: 30s
+        timeout: 10s
+        retries: 5
+        start_period: 3m # 3 minutes is a reasonable time
+      networks:
+        - ha_network
 
   # ---- Vision Gateway (CPU heavy, light GPU use unless you enable GPU OCR) ----
   vision-gateway:
@@ -363,6 +366,7 @@ services:
     container_name: compreface-api
     image: exadel/compreface-api:1.1.0
     restart: unless-stopped
+    mem_limit: 1g
     ports:
       - "8000:8000"
     volumes:
@@ -371,10 +375,8 @@ services:
       compreface-postgres:
         condition: service_healthy
     environment:
-      - POSTGRES_USER=${COMPREFACE_POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${COMPREFACE_POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_URL=jdbc:postgresql://compreface-postgres:5432/frs
-      - JAVA_OPTS=-Xmx4g
+      POSTGRES_URL: "jdbc:postgresql://${COMPREFACE_POSTGRES_USER:-postgres}:${COMPREFACE_POSTGRES_PASSWORD:-postgres}@compreface-postgres-db:5432/frs"
+      API_JAVA_OPTS: "-Xmx768m"
     networks:
       - ha_network
 
@@ -383,10 +385,16 @@ services:
     container_name: compreface-admin
     image: exadel/compreface-admin:1.1.0
     restart: unless-stopped
+    environment:
+      DB_HOST: compreface-postgres
+      DB_USER: ${COMPREFACE_POSTGRES_USER:-postgres}
+      DB_NAME: frs
+      DB_PASSWORD: ${COMPREFACE_POSTGRES_PASSWORD:-postgres}
     ports:
-      - "81:80" # CompreFace Admin UI will be on port 81
+      - "81:8080"
     depends_on:
-      - compreface-api
+      compreface-postgres:
+        condition: service_healthy
     networks:
       - ha_network
 
@@ -411,11 +419,11 @@ services:
 
   # CompreFace PostgreSQL Database: A dedicated DB for CompreFace
   compreface-postgres:
-    container_name: compreface-postgres
+    container_name: compreface-postgres-db
     image: postgres:13.1
     restart: unless-stopped
     ports:
-      - "5433:5432" # Use port 5433 to avoid conflict with hassistant-postgres
+      - "5433:5432"
     environment:
       - POSTGRES_USER=${COMPREFACE_POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${COMPREFACE_POSTGRES_PASSWORD:-postgres}
@@ -425,10 +433,11 @@ services:
     networks:
       - ha_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d compreface_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${COMPREFACE_POSTGRES_USER:-postgres} -d frs"]
       interval: 10s
       timeout: 5s
-      retries: 5    
+      retries: 5
+
   
   # Computer Control Agent (optional, for remote computer automation)
   # Uncomment to enable computer control capabilities
