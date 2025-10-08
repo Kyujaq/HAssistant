@@ -1,0 +1,34 @@
+# Web framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.8.2
+
+# Core processing libraries
+numpy==1.24.3
+requests==2.32.3
+
+# PyTorch 1.13.1 - Last version with full Kepler (compute capability 3.7) support
+# Using CUDA 11.7 wheels (compatible with CUDA 11.4 runtime)
+torch==1.13.1+cu117
+torchvision==0.14.1+cu117
+--extra-index-url https://download.pytorch.org/whl/cu117
+
+# OpenCV with CUDA support
+# Using prebuilt headless version (CUDA support depends on build)
+# For full CUDA support, may need custom build but headless works for CPU fallback
+opencv-contrib-python-headless==4.8.1.78
+
+# OCR libraries
+# PaddleOCR - using older version compatible with our setup
+paddlepaddle==2.4.2
+paddleocr==2.6.1.3
+
+# YOLO detection (ultralytics - compatible with PyTorch 1.13)
+ultralytics==8.0.20
+
+# Image processing
+pillow==10.0.0
+scikit-image==0.21.0
+
+# GPU monitoring
+py3nvml==0.2.7
