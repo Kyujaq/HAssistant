@@ -459,6 +459,68 @@ services:
   #   networks:
   #     - ha_network
 
+  # ---- Tesla K80 Vision Workers ----
+  # Two GPU-accelerated workers for vision preprocessing and detection
+  # Using Tesla K80 dual-GPU (Kepler GK210) with CUDA 11.4
+  
+  vision-screen:
+    build:
+      context: ./services/vision-worker
+      dockerfile: Dockerfile
+    container_name: vision-worker-screen
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+              device_ids: ["${VISION_SCREEN_CUDA_DEVICE:-2}"]
+    environment:
+      - VISION_CUDA_DEVICE=${VISION_SCREEN_CUDA_DEVICE:-2}
+      - VISION_ROLE=screen
+      - PORT=8089
+      - NVIDIA_VISIBLE_DEVICES=${VISION_SCREEN_CUDA_DEVICE:-2}
+    ports:
+      - "8089:8089"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8089/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - ha_network
+
+  vision-room:
+    build:
+      context: ./services/vision-worker
+      dockerfile: Dockerfile
+    container_name: vision-worker-room
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+              device_ids: ["${VISION_ROOM_CUDA_DEVICE:-3}"]
+    environment:
+      - VISION_CUDA_DEVICE=${VISION_ROOM_CUDA_DEVICE:-3}
+      - VISION_ROLE=room
+      - PORT=8090
+      - NVIDIA_VISIBLE_DEVICES=${VISION_ROOM_CUDA_DEVICE:-3}
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - ha_network
+
 
 
 volumes:
