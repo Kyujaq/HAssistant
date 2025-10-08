@@ -5,16 +5,19 @@ This directory contains the core microservices that make up HAssistant.
 ## Service Overview
 
 ### glados-orchestrator
-**Purpose**: Query routing service that intelligently decides when to use Hermes (personality) vs Qwen (reasoning)
+**Purpose**: Tool provider service for Ollama LLM function calling
 
 **Port**: 8082  
-**Key Features**:
-- Routes queries between fast personality model (Hermes) and reasoning model (Qwen)
-- Integrates with Letta Bridge for memory
-- Supports OpenAI-compatible API endpoints
-- Streaming responses
+**Architecture**: Home Assistant → Ollama → Orchestrator (tools)
 
-**Documentation**: See [main.py](glados-orchestrator/main.py)
+**Key Features**:
+- RESTful tool endpoints for LLM function calling
+- Memory integration via Letta Bridge (`/tool/letta_query`)
+- Time and date utilities (`/tool/get_time`)
+- Home Assistant skill execution (`/tool/execute_ha_skill`)
+- Lightweight, stateless design
+
+**Documentation**: See [ORCHESTRATOR_TOOL_PROVIDER.md](../docs/architecture/ORCHESTRATOR_TOOL_PROVIDER.md) and [HA_OLLAMA_DIRECT_CONNECTION.md](../docs/setup/HA_OLLAMA_DIRECT_CONNECTION.md)
 
 ---
 
@@ -69,21 +72,30 @@ This directory contains the core microservices that make up HAssistant.
 │    Home Assistant Assist    │
 └──────────┬──────────────────┘
            │
-┌──────────▼──────────────────┐
-│   glados-orchestrator       │
-│   (Query Router)            │
-└──┬───────────────────┬──────┘
-   │                   │
-   │              ┌────▼────────┐
-   │              │ letta-bridge│
-   │              │  (Memory)   │
-   │              └─────────────┘
+           │ (direct connection)
+           ▼
+┌──────────────────────────────┐
+│       ollama-chat            │
+│       (LLMs)                 │
+└──┬───────────────────────────┘
    │
-┌──▼───────────┐
-│ ollama-chat  │
-│  (LLMs)      │
-└──────────────┘
+   │ (function calling)
+   │
+   ▼
+┌──────────────────────────────┐
+│   glados-orchestrator        │
+│   (Tool Provider)            │
+└──┬───────────────────────────┘
+   │
+   │ (memory queries)
+   ▼
+┌──────────────────────────────┐
+│      letta-bridge            │
+│      (Memory)                │
+└──────────────────────────────┘
 ```
+
+**Key Architecture Change**: Home Assistant now connects directly to Ollama instead of through the orchestrator. The orchestrator provides specialized tools that Ollama can call via function calling.
 
 ## Building Services
 

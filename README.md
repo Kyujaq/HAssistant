@@ -45,7 +45,7 @@ Recent merge commits show each major feature branch already collapsed into `work
 | Text-to-speech | `piper-glados` | Wyoming Piper server with GLaDOS and kathleen-high voices. | NVIDIA GPU 1, `piper_data` volume. |
 | Memory API | `letta-bridge` | FastAPI bridge for tiered memory, embeddings, and briefs. | `postgres`, `redis`, `.env` secrets. |
 | Persistence | `postgres`, `redis` | Store pgvector embeddings + session cache. | `scripts/*.sql` for schema bootstrapping. |
-| Conversation router | `glados-orchestrator` | Determines when to use Hermes vs. Qwen, streams responses, syncs memory. | `ollama-chat`, `letta-bridge`. |
+| Conversation router | `glados-orchestrator` | Provides specialized tools for Ollama LLMs (memory, time, skills). | `letta-bridge`. |
 | Agent runtime | `qwen-agent` | Optional advanced agent that calls tools via Letta Bridge. | `letta-bridge`, `agent_data` volume (optional). |
 | Vision ingress | `vision-gateway` | Consumes Frigate frames, performs OCR with anchors, pushes to HA. | `frigate`, `ollama-vision`, Home Assistant token. |
 | Motion capture | `frigate` | Supplies webcam motion events and snapshots to the vision stack. | NVIDIA GPU 1, USB cameras `/dev/video*`. |
@@ -56,10 +56,11 @@ These services are orchestrated through `docker-compose.yml`, and most of them c
 ## System Flow Overview
 
 1. **Wake & capture**: A Raspberry Pi client or HA microphone triggers Assist, streaming audio to Wyoming Whisper.
-2. **Assist prompt**: Home Assistant forwards the transcribed prompt to the GLaDOS Orchestrator which decides whether Hermes alone can answer or whether Qwen reasoning plus Hermes personality is required.
-3. **Memory lookup**: The orchestrator and optional Qwen-Agent call the Letta Bridge to retrieve relevant memories, then persist new conversational context after replying.
-4. **Response**: Piper generates speech (optionally routed through the Windows clarity profile) which can be played locally, forwarded to the Pi client, or sent over USB audio into a Windows voice session.
-5. **Automation hooks**: Vision Gateway + Frigate monitor displays or RTSP feeds, pushing actionable events into HA or the Computer Control Agent for closed-loop automation.
+2. **Assist prompt**: Home Assistant forwards the transcribed prompt directly to Ollama for LLM processing.
+3. **Tool calling**: Ollama may call GLaDOS Orchestrator tools for memory lookup, time info, or HA skills.
+4. **Memory integration**: The Orchestrator queries Letta Bridge for relevant memories when tools are invoked.
+5. **Response**: Piper generates speech (optionally routed through the Windows clarity profile) which can be played locally, forwarded to the Pi client, or sent over USB audio into a Windows voice session.
+6. **Automation hooks**: Vision Gateway + Frigate monitor displays or RTSP feeds, pushing actionable events into HA or the Computer Control Agent for closed-loop automation.
 
 The architecture diagram below highlights the primary Assist → Orchestrator → Memory → Speech loop, while the service inventory shows where optional modules plug in.
 
@@ -141,13 +142,13 @@ docker exec -it hassistant-ollama ollama list
 1. Navigate to **Settings → Devices & Services**
 2. Click **Add Integration** → Search for "Ollama"
 3. Configure:
-   - URL: `http://hassistant-ollama:11434`
-   - Model: `glados-hermes3` or `glados-qwen`
+   - URL: `http://ollama-chat:11434` (direct connection to Ollama)
+   - Model: `hermes3` or `qwen3:4b-instruct-2507-q4_K_M`
 4. Add Wyoming services:
    - **Whisper STT**: `tcp://hassistant-whisper:10300`
    - **Piper TTS**: `tcp://hassistant-piper:10200`
 
-See [docs/setup/HA_ASSIST_SETUP.md](docs/setup/HA_ASSIST_SETUP.md) and [docs/setup/HA_VOICE_CONFIG.md](docs/setup/HA_VOICE_CONFIG.md) for detailed configuration.
+See [docs/setup/HA_OLLAMA_DIRECT_CONNECTION.md](docs/setup/HA_OLLAMA_DIRECT_CONNECTION.md) for tool integration and [docs/setup/HA_ASSIST_SETUP.md](docs/setup/HA_ASSIST_SETUP.md) for detailed configuration.
 
 ### 5. Test Memory Integration (Optional)
 

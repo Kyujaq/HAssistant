@@ -168,23 +168,19 @@ services:
    # volumes:
    #   - ./agent_data:/data
 
-  # GLaDOS Orchestrator - Routes queries between Qwen (brain) and Hermes (personality)
+  # GLaDOS Orchestrator - Tool Provider for Ollama LLM function calling
   glados-orchestrator:
       build:
         context: ./services/glados-orchestrator
         dockerfile: Dockerfile
       container_name: hassistant-glados-orchestrator
       environment:
-        - OLLAMA_BASE_URL=http://ollama-chat:11434
-        - QWEN_MODEL=qwen3:4b-instruct-2507-q4_K_M
-        - HERMES_MODEL=hermes3
-        - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8000 # Corrected port
+        - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8000
         - LETTA_API_KEY=${BRIDGE_API_KEY:-dev-key}
         - PORT=8082
       ports:
         - "8082:8082"
       depends_on:
-        - ollama-chat
         - letta-bridge
       restart: unless-stopped
       healthcheck:
@@ -192,7 +188,7 @@ services:
         interval: 30s
         timeout: 10s
         retries: 5
-        start_period: 3m # 3 minutes is a reasonable time
+        start_period: 30s
       networks:
         - ha_network
 
