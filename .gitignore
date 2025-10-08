@@ -106,3 +106,22 @@ ha_config/.storage/
 ha_config/.cloud/
 ha_config/deps/
 ha_config/tts/
+
+# Vision worker model cache (auto-downloaded)
+services/vision-worker/app/*.pt
+services/vision-worker/app/*.pth
+services/vision-worker/app/*.onnx
+services/vision-worker/app/.paddleocr/
+
+# PostgreSQL data
+postgres_data/
+
+# Redis data
+redis_data/
+
+# Frigate media
+frigate/media/
+
+# CompreFace data
+compreface_db_storage/
+double-take-media/
