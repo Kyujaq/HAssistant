@@ -49,6 +49,7 @@ Recent merge commits show each major feature branch already collapsed into `work
 | Agent runtime | `qwen-agent` | Optional advanced agent that calls tools via Letta Bridge. | `letta-bridge`, `agent_data` volume (optional). |
 | Vision ingress | `vision-gateway` | Consumes Frigate frames, performs OCR with anchors, pushes to HA. | `frigate`, `ollama-vision`, Home Assistant token. |
 | Motion capture | `frigate` | Supplies webcam motion events and snapshots to the vision stack. | NVIDIA GPU 1, USB cameras `/dev/video*`. |
+| Vision workers (optional) | `vision-screen`, `vision-room` | GPU-accelerated preprocessing and detection for K80 GPUs. | NVIDIA Tesla K80 GPUs 2-3, see `docs/k80.md`. |
 | Optional desktop automation | `computer-control-agent` (commented) | Runs PyAutoGUI + OCR tasks or relays to Windows Voice Assistant. | `vision-gateway`, `ollama-chat`, Windows voice cable setup. |
 
 These services are orchestrated through `docker-compose.yml`, and most of them can be toggled on/off depending on which capabilities you need.
@@ -92,6 +93,8 @@ The architecture diagram below highlights the primary Assist → Orchestrator �
 
 ### Hardware
 - NVIDIA GPU(s) with CUDA support
+  - Recommended: GTX 1070+, RTX series for LLM/STT/TTS
+  - Optional: Tesla K80 for vision preprocessing (see [docs/k80.md](docs/k80.md))
 - Raspberry Pi (optional, for voice client)
 - Microphone and speaker
 
@@ -366,6 +369,7 @@ See [docs/architecture/MEMORY_INTEGRATION.md](docs/architecture/MEMORY_INTEGRATI
 
 - [Quick Start Guide](QUICK_START.md) - Fast setup walkthrough
 - [PC Control Agent](services/qwen-agent/PC_CONTROL_AGENT.md) - Voice-controlled PC operations (NEW!)
+- [Tesla K80 GPU Setup](docs/k80.md) - Vision worker setup with K80 GPUs (NEW!)
 - [Memory Integration](docs/architecture/MEMORY_INTEGRATION.md) - Letta-style memory system documentation
 - [HA Assist Setup](docs/setup/HA_ASSIST_SETUP.md) - Home Assistant Assist configuration
 - [HA Voice Config](docs/setup/HA_VOICE_CONFIG.md) - Voice pipeline setup
@@ -472,6 +476,8 @@ HAssistant/
 
 The system supports multiple NVIDIA GPUs with automatic allocation:
 
+### Standard Setup (GTX 1080 Ti + 1070)
+
 ```yaml
 # docker-compose.yml
 deploy:
@@ -484,6 +490,34 @@ deploy:
 ```
 
 Ollama automatically distributes model layers across available GPUs for optimal performance.
+
+### Tesla K80 Vision Workers (Optional)
+
+Add GPU-accelerated vision preprocessing workers using Tesla K80 (Kepler):
+
+```bash
+# Configure K80 GPU assignments
+export VISION_SCREEN_CUDA_DEVICE=2  # First K80 GPU
+export VISION_ROOM_CUDA_DEVICE=3    # Second K80 GPU
+
+# Start vision workers
+make k80-up
+```
+
+See [docs/k80.md](docs/k80.md) for complete K80 setup guide including:
+- Driver installation (NVIDIA 470.x - 515.x)
+- CUDA 11.4 compatibility
+- Cooling requirements
+- Performance tuning
+- Troubleshooting
+
+**K80 Architecture Overview:**
+```
+GPU 0: GTX 1080 Ti → Ollama Vision (Qwen-VL 7B)
+GPU 1: GTX 1070    → Whisper STT + Piper TTS + Frigate
+GPU 2: Tesla K80#0 → Vision screen worker (preprocessing)
+GPU 3: Tesla K80#1 → Vision room worker (detection)
+```
 
 ## Troubleshooting
 
@@ -524,13 +558,38 @@ curl http://localhost:10200/
 ### Pi client issues
 See [PI_SETUP.md](PI_SETUP.md) troubleshooting section.
 
+### K80 Vision Workers
+```bash
+# Detect K80 GPUs
+make k80-detect
+
+# Test workers
+make k80-warmup
+
+# Check health
+curl http://localhost:8089/health | jq
+
+# View logs
+make k80-logs
+```
+
+For comprehensive K80 troubleshooting, see [docs/k80.md](docs/k80.md).
+
 ## Performance
 
-With dual GPU setup (GTX 1080 Ti + GTX 1070):
+### Standard GPUs (GTX 1080 Ti + GTX 1070)
 - **Hermes-3 3B**: ~50-100 tokens/sec
 - **Qwen 2.5 7B**: ~30-50 tokens/sec
 - **Whisper STT**: <1s latency
 - **Piper TTS**: <500ms latency
+
+### Tesla K80 Vision Workers (Optional)
+When K80 workers are enabled:
+- **OpenCV CUDA preprocessing**: 40-50 FPS
+- **YOLOv8n detection** (640x640): 25-30 FPS
+- **PaddleOCR**: 8-10 imgs/sec (CPU)
+
+K80 provides 3-5x speedup over CPU for vision preprocessing while keeping the main GPUs (1080 Ti, 1070) dedicated to LLM/STT/TTS workloads.
 
 ## Contributing
 
