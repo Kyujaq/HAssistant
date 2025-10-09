@@ -56,7 +56,7 @@ services:
     image: rhasspy/wyoming-piper:latest
     container_name: hassistant-piper-glados
     runtime: nvidia
-    command: --voice en_US-glados-medium --uri 'tcp://0.0.0.0:10200' --data-dir /data --piper /usr/share/piper/piper
+    command: --voice en_US-glados-medium --uri 'tcp://0.0.0.0:10200' --data-dir /data --piper /usr/share/piper/piper --streaming
     deploy:
       resources:
         reservations:
@@ -318,6 +318,7 @@ services:
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
       - NVIDIA_VISIBLE_DEVICES=0
+      - OLLAMA_KEEP_ALIVE=-1  # Keep models loaded indefinitely
     volumes:
       - ollama_chat_data:/root/.ollama
       - ./ollama/modelfiles:/root/.ollama/modelfiles:ro

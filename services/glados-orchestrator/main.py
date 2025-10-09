@@ -1,23 +1,25 @@
 """
-GLaDOS Orchestrator v2.1 - Tool Provider + Smart Routing
+GLaDOS Orchestrator v2.2 - Unified Voice Architecture
 
-Combines two architectural patterns:
+Combines three architectural patterns:
 1. Tool Provider: Provides specialized tools for Ollama LLM function calling
 2. Smart Routing: Intelligently routes queries between models for optimal performance
+3. Personality Handoff: Ensures consistent GLaDOS voice across all responses
 
 Architecture:
 - Home Assistant connects to this orchestrator
 - Transparent pass-through for model management (/api/tags, /api/pull, etc.)
 - Smart routing for chat (/api/chat):
-  * Simple queries → glados-hermes3 (fast, 50-100 tok/s)
-  * Complex queries → qwen3:4b (analytical, 30-50 tok/s)
+  * Simple queries → glados-hermes3 (direct, fast path)
+  * Complex queries → qwen3:4b (background analysis) → glados-hermes3 (GLaDOS voice)
 - Tools accessible via /tool/* endpoints
 
 Features:
 - RESTful tool endpoints for LLM function calling
-- Complexity-based model routing
+- Complexity-based model routing with personality preservation
+- Qwen analyzes complex queries in background, Hermes presents results in character
 - Integrates with Letta Bridge for persistent memory
-- Streaming support
+- Streaming support for both simple and complex queries
 - Debug logging for troubleshooting
 """
 
@@ -54,9 +56,9 @@ QWEN_MODEL = os.getenv("QWEN_MODEL", "qwen3:4b-instruct-2507-q4_K_M")
 VISION_MODEL = os.getenv("VISION_MODEL", "qwen2.5vl:7b")
 
 app = FastAPI(
-    title="GLaDOS Orchestrator - Tool Provider + Smart Routing",
-    version="2.1.0",
-    description="Tool endpoints and intelligent model routing for Ollama LLM"
+    title="GLaDOS Orchestrator - Unified Voice Architecture",
+    version="2.2.0",
+    description="Tool endpoints, intelligent routing, and personality-consistent responses for Ollama LLM"
 )
 
 # Pydantic models for tool requests/responses
@@ -232,7 +234,7 @@ async def list_tools():
     """List all available tools in Ollama function calling format"""
     return {
         "tools": TOOL_DEFINITIONS,
-        "version": "2.1.0",
+        "version": "2.2.0",
         "description": "GLaDOS Orchestrator Tool Provider"
     }
 
@@ -306,7 +308,7 @@ async def execute_ha_skill(request: HASkillRequest):
 
 @app.api_route("/api/chat", methods=["POST"])
 async def chat_with_routing(request: Request):
-    """Smart routing for chat requests based on complexity"""
+    """Smart routing for chat requests with Hermes personality handoff"""
     try:
         body = await request.json()
 
@@ -327,46 +329,130 @@ async def chat_with_routing(request: Request):
 
         # Route based on complexity
         if complexity == QueryComplexity.SIMPLE:
+            # Simple query: Direct to Hermes (fast path)
             target_model = HERMES_MODEL
             target_url = OLLAMA_CHAT_URL
-            logger.info(f"🎯 ROUTING: SIMPLE → {HERMES_MODEL}")
-        else:
-            target_model = QWEN_MODEL
-            target_url = OLLAMA_CHAT_URL
-            logger.info(f"🎯 ROUTING: COMPLEX → {QWEN_MODEL}")
+            logger.info(f"🎯 ROUTING: SIMPLE → {HERMES_MODEL} (direct)")
 
-        # Override model in request
-        body["model"] = target_model
+            # Override model in request
+            body["model"] = target_model
 
-        # Check if streaming
-        if body.get("stream", False):
-            # Stream response - keep client alive during streaming
-            async def stream_proxy():
+            # Inject GLaDOS personality (replace HA's system message if present)
+            # HA often sends "You are a helpful assistant" which overrides model personality
+            glados_system_msg = {
+                "role": "system",
+                "content": "You are GLaDOS, the sarcastic AI from Portal. You are witty, intelligent, and occasionally passive-aggressive. You help with tasks while maintaining your characteristic dry humor."
+            }
+
+            if messages and messages[0].get("role") == "system":
+                # Replace HA's system message with GLaDOS personality
+                body["messages"] = [glados_system_msg] + messages[1:]
+                logger.debug("Replaced HA system message with GLaDOS personality")
+            else:
+                # No system message, add GLaDOS personality
+                body["messages"] = [glados_system_msg] + messages
+                logger.debug("Injected GLaDOS personality for simple query")
+
+            # Check if streaming
+            if body.get("stream", False):
+                # Stream response - keep client alive during streaming
+                async def stream_proxy():
+                    async with httpx.AsyncClient(timeout=120.0) as client:
+                        async with client.stream(
+                            "POST",
+                            f"{target_url}/api/chat",
+                            json=body
+                        ) as response:
+                            async for chunk in response.aiter_bytes():
+                                yield chunk
+
+                return StreamingResponse(
+                    stream_proxy(),
+                    media_type="application/x-ndjson"
+                )
+            else:
+                # Regular response
                 async with httpx.AsyncClient(timeout=120.0) as client:
-                    async with client.stream(
-                        "POST",
+                    response = await client.post(
                         f"{target_url}/api/chat",
                         json=body
-                    ) as response:
-                        async for chunk in response.aiter_bytes():
-                            yield chunk
+                    )
+                    return Response(
+                        content=response.content,
+                        status_code=response.status_code,
+                        media_type="application/json"
+                    )
 
-            return StreamingResponse(
-                stream_proxy(),
-                media_type="application/x-ndjson"
-            )
         else:
-            # Regular response
+            # Complex query: Qwen → Hermes handoff for personality consistency
+            logger.info(f"🎯 ROUTING: COMPLEX → {QWEN_MODEL} (background) → {HERMES_MODEL} (voice)")
+
+            # Step 1: Send to Qwen for analysis (force non-streaming for handoff)
+            qwen_body = body.copy()
+            qwen_body["model"] = QWEN_MODEL
+            qwen_body["stream"] = False  # Force non-streaming for handoff
+
             async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
-                    f"{target_url}/api/chat",
-                    json=body
+                logger.debug(f"Querying Qwen for analysis...")
+                qwen_response = await client.post(
+                    f"{OLLAMA_CHAT_URL}/api/chat",
+                    json=qwen_body
                 )
-                return Response(
-                    content=response.content,
-                    status_code=response.status_code,
-                    media_type="application/json"
-                )
+                qwen_response.raise_for_status()
+                qwen_data = qwen_response.json()
+
+                # Extract Qwen's response
+                qwen_content = qwen_data.get("message", {}).get("content", "")
+                logger.debug(f"Qwen response: {qwen_content[:100]}...")
+
+                # Step 2: Send Qwen's analysis to Hermes for GLaDOS personality
+                hermes_messages = [
+                    {
+                        "role": "system",
+                        "content": "You are GLaDOS. Rephrase the following analysis in your characteristic sarcastic, witty voice. Maintain the factual content but add your personality."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Original question: {user_query}\n\nAnalysis to rephrase: {qwen_content}"
+                    }
+                ]
+
+                hermes_body = {
+                    "model": HERMES_MODEL,
+                    "messages": hermes_messages,
+                    "stream": body.get("stream", False)  # Match original streaming preference
+                }
+
+                logger.debug(f"Sending to Hermes for personality handoff...")
+
+                # Check if streaming
+                if hermes_body.get("stream", False):
+                    # Stream Hermes response
+                    async def stream_hermes():
+                        async with httpx.AsyncClient(timeout=120.0) as stream_client:
+                            async with stream_client.stream(
+                                "POST",
+                                f"{OLLAMA_CHAT_URL}/api/chat",
+                                json=hermes_body
+                            ) as response:
+                                async for chunk in response.aiter_bytes():
+                                    yield chunk
+
+                    return StreamingResponse(
+                        stream_hermes(),
+                        media_type="application/x-ndjson"
+                    )
+                else:
+                    # Regular Hermes response
+                    hermes_response = await client.post(
+                        f"{OLLAMA_CHAT_URL}/api/chat",
+                        json=hermes_body
+                    )
+                    return Response(
+                        content=hermes_response.content,
+                        status_code=hermes_response.status_code,
+                        media_type="application/json"
+                    )
 
     except Exception as e:
         logger.error(f"Error in chat routing: {e}")
@@ -408,9 +494,9 @@ async def health_check():
     """Health check endpoint"""
     health_status = {
         "service": "glados-orchestrator",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "status": "healthy",
-        "mode": "tool-provider + smart-routing",
+        "mode": "unified-voice-architecture",
         "letta_bridge": "unknown",
         "ollama_chat": "unknown",
         "tools_available": len(TOOL_DEFINITIONS),
@@ -457,9 +543,9 @@ async def root():
     """Root endpoint with service info"""
     return {
         "service": "GLaDOS Orchestrator",
-        "version": "2.1.0",
-        "mode": "tool-provider + smart-routing",
-        "description": "Tool endpoints and intelligent model routing for Ollama LLM",
+        "version": "2.2.0",
+        "mode": "unified-voice-architecture",
+        "description": "Tool endpoints, intelligent routing, and personality-consistent responses for Ollama LLM",
         "endpoints": {
             "tools": "/tool/list",
             "get_time": "/tool/get_time",
@@ -470,15 +556,15 @@ async def root():
             "ollama_api": "/api/* (pass-through to Ollama)"
         },
         "routing": {
-            "simple_queries": f"{HERMES_MODEL} (fast, GLaDOS personality)",
-            "complex_queries": f"{QWEN_MODEL} (analytical reasoning)"
+            "simple_queries": f"{HERMES_MODEL} (direct, fast path)",
+            "complex_queries": f"{QWEN_MODEL} (background analysis) → {HERMES_MODEL} (GLaDOS voice)"
         },
         "usage": "Connect Home Assistant to this orchestrator. Chat queries will be automatically routed. Tools available via function calling."
     }
 
 if __name__ == "__main__":
     import uvicorn
-    logger.info(f"Starting GLaDOS Orchestrator v2.1")
-    logger.info(f"Routing: SIMPLE={HERMES_MODEL}, COMPLEX={QWEN_MODEL}")
+    logger.info(f"Starting GLaDOS Orchestrator v2.2 - Unified Voice Architecture")
+    logger.info(f"Routing: SIMPLE={HERMES_MODEL} (direct), COMPLEX={QWEN_MODEL}→{HERMES_MODEL} (handoff)")
     logger.info(f"Ollama: {OLLAMA_CHAT_URL}")
     uvicorn.run(app, host="0.0.0.0", port=PORT)
