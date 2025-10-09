@@ -1,32 +1,37 @@
 """
-GLaDOS Orchestrator - Tool Provider for Ollama LLM
+GLaDOS Orchestrator v2.1 - Tool Provider + Smart Routing
 
-Provides specialized tools for Ollama-based conversation agents:
-- Memory integration via Letta Bridge
-- Time and date utilities
-- Home Assistant skill execution
-- Custom GLaDOS personality tools
+Combines two architectural patterns:
+1. Tool Provider: Provides specialized tools for Ollama LLM function calling
+2. Smart Routing: Intelligently routes queries between models for optimal performance
 
 Architecture:
-- Home Assistant connects directly to Ollama
-- Ollama models use this service as a tool provider
-- Tools are exposed via REST API endpoints
+- Home Assistant connects to this orchestrator
+- Transparent pass-through for model management (/api/tags, /api/pull, etc.)
+- Smart routing for chat (/api/chat):
+  * Simple queries → glados-hermes3 (fast, 50-100 tok/s)
+  * Complex queries → qwen3:4b (analytical, 30-50 tok/s)
+- Tools accessible via /tool/* endpoints
 
 Features:
 - RESTful tool endpoints for LLM function calling
+- Complexity-based model routing
 - Integrates with Letta Bridge for persistent memory
-- Lightweight, stateless service design
+- Streaming support
 - Debug logging for troubleshooting
 """
 
+import re
 import os
 import json
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any
+from enum import Enum
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field
 
 # Logging configuration
@@ -41,10 +46,17 @@ LETTA_BRIDGE_URL = os.getenv("LETTA_BRIDGE_URL", "http://hassistant-letta-bridge
 LETTA_API_KEY = os.getenv("LETTA_API_KEY", "d6DkfuU7zPOpcoeAVabiNNPhTH6TcFrZ")
 PORT = int(os.getenv("PORT", "8082"))
 
+# Ollama configuration for routing
+OLLAMA_CHAT_URL = os.getenv("OLLAMA_CHAT_URL", "http://ollama-chat:11434")
+OLLAMA_VISION_URL = os.getenv("OLLAMA_VISION_URL", "http://ollama-vision:11434")
+HERMES_MODEL = os.getenv("HERMES_MODEL", "glados-hermes3")
+QWEN_MODEL = os.getenv("QWEN_MODEL", "qwen3:4b-instruct-2507-q4_K_M")
+VISION_MODEL = os.getenv("VISION_MODEL", "qwen2.5vl:7b")
+
 app = FastAPI(
-    title="GLaDOS Orchestrator - Tool Provider",
-    version="2.0.0",
-    description="Tool endpoints for Ollama LLM function calling"
+    title="GLaDOS Orchestrator - Tool Provider + Smart Routing",
+    version="2.1.0",
+    description="Tool endpoints and intelligent model routing for Ollama LLM"
 )
 
 # Pydantic models for tool requests/responses
@@ -60,6 +72,10 @@ class LettaQueryRequest(BaseModel):
 class HASkillRequest(BaseModel):
     skill_name: str
     parameters: Dict[str, Any] = {}
+
+class QueryComplexity(Enum):
+    SIMPLE = "simple"
+    COMPLEX = "complex"
 
 # Tool definitions for Ollama function calling
 TOOL_DEFINITIONS = [
@@ -121,7 +137,54 @@ TOOL_DEFINITIONS = [
     }
 ]
 
-# Helper functions for memory integration
+# Complexity detection patterns (from POC)
+SIMPLE_PATTERNS = [
+    re.compile(r'\b(turn|set|dim|brighten|switch)\s+(on|off)\b', re.IGNORECASE),
+    re.compile(r'\b(what|tell|give|show)\b', re.IGNORECASE),
+    re.compile(r'\b(open|close|lock|unlock)\b', re.IGNORECASE),
+    re.compile(r'\b(play|pause|stop|skip|next|previous)\b', re.IGNORECASE),
+    re.compile(r'\b(hello|hi|hey|good morning|good evening)\b', re.IGNORECASE),
+    re.compile(r'\b(how are you|how\'s it going|what\'s up)\b', re.IGNORECASE),
+    re.compile(r'\b(thank|thanks|please)\b', re.IGNORECASE),
+]
+
+COMPLEX_PATTERNS = [
+    re.compile(r'\b(plan|schedule|organize|arrange)\s+(my|a|the)\b', re.IGNORECASE),
+    re.compile(r'\b(calendar|appointment|meeting)\s+(on|at|for|tomorrow|next)\b', re.IGNORECASE),
+    re.compile(r'\b(if.*then|when.*then)\b', re.IGNORECASE),
+    re.compile(r'\b(compare|analyze|explain|why|how does)\b', re.IGNORECASE),
+]
+
+def detect_complexity(query: str) -> QueryComplexity:
+    """Determine if query is simple or complex"""
+    query_lower = query.lower()
+    word_count = len(query_lower.split())
+
+    logger.debug(f"Analyzing query: '{query}' ({word_count} words)")
+
+    # Check for complex patterns first
+    for pattern in COMPLEX_PATTERNS:
+        if pattern.search(query_lower):
+            logger.info(f"✓ COMPLEX pattern matched: {pattern.pattern}")
+            return QueryComplexity.COMPLEX
+
+    # Check for simple patterns
+    for pattern in SIMPLE_PATTERNS:
+        if pattern.search(query_lower):
+            logger.info(f"✓ SIMPLE pattern matched: {pattern.pattern}")
+            return QueryComplexity.SIMPLE
+
+    # Word count heuristic
+    if word_count <= 10:
+        logger.info(f"✓ SIMPLE (≤10 words)")
+        return QueryComplexity.SIMPLE
+    elif word_count > 15:
+        logger.info(f"✓ COMPLEX (>15 words)")
+        return QueryComplexity.COMPLEX
+
+    # Default: SIMPLE
+    logger.info(f"✓ SIMPLE (default)")
+    return QueryComplexity.SIMPLE
 
 # Helper functions for memory integration
 async def retrieve_memory(query: str, limit: int = 5) -> List[Dict[str, Any]]:
@@ -169,7 +232,7 @@ async def list_tools():
     """List all available tools in Ollama function calling format"""
     return {
         "tools": TOOL_DEFINITIONS,
-        "version": "2.0.0",
+        "version": "2.1.0",
         "description": "GLaDOS Orchestrator Tool Provider"
     }
 
@@ -198,13 +261,13 @@ async def letta_query(request: LettaQueryRequest):
     try:
         logger.info(f"letta_query called with query: {request.query}")
         memories = await retrieve_memory(request.query, request.limit)
-        
+
         result = {
             "query": request.query,
             "count": len(memories),
             "memories": []
         }
-        
+
         for mem in memories:
             result["memories"].append({
                 "title": mem.get("title", ""),
@@ -213,7 +276,7 @@ async def letta_query(request: LettaQueryRequest):
                 "created_at": mem.get("created_at", ""),
                 "score": mem.get("score", 0.0)
             })
-        
+
         return ToolResponse(success=True, data=result)
     except Exception as e:
         logger.error(f"Error in letta_query: {str(e)}")
@@ -224,7 +287,7 @@ async def execute_ha_skill(request: HASkillRequest):
     """Execute a Home Assistant skill or automation"""
     try:
         logger.info(f"execute_ha_skill called: {request.skill_name} with params: {request.parameters}")
-        
+
         # Placeholder for HA skill execution
         # In production, this would integrate with Home Assistant's service API
         result = {
@@ -233,22 +296,128 @@ async def execute_ha_skill(request: HASkillRequest):
             "status": "placeholder",
             "message": "HA skill execution not yet implemented. This endpoint is ready for integration."
         }
-        
+
         return ToolResponse(success=True, data=result)
     except Exception as e:
         logger.error(f"Error in execute_ha_skill: {str(e)}")
         return ToolResponse(success=False, error=str(e))
+
+# Smart Routing Endpoints
+
+@app.api_route("/api/chat", methods=["POST"])
+async def chat_with_routing(request: Request):
+    """Smart routing for chat requests based on complexity"""
+    try:
+        body = await request.json()
+
+        # Extract user query from messages
+        messages = body.get("messages", [])
+        user_query = ""
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                user_query = msg.get("content", "")
+                break
+
+        if not user_query:
+            logger.warning("No user message found, defaulting to SIMPLE")
+            complexity = QueryComplexity.SIMPLE
+        else:
+            # Detect complexity
+            complexity = detect_complexity(user_query)
+
+        # Route based on complexity
+        if complexity == QueryComplexity.SIMPLE:
+            target_model = HERMES_MODEL
+            target_url = OLLAMA_CHAT_URL
+            logger.info(f"🎯 ROUTING: SIMPLE → {HERMES_MODEL}")
+        else:
+            target_model = QWEN_MODEL
+            target_url = OLLAMA_CHAT_URL
+            logger.info(f"🎯 ROUTING: COMPLEX → {QWEN_MODEL}")
+
+        # Override model in request
+        body["model"] = target_model
+
+        # Check if streaming
+        if body.get("stream", False):
+            # Stream response - keep client alive during streaming
+            async def stream_proxy():
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{target_url}/api/chat",
+                        json=body
+                    ) as response:
+                        async for chunk in response.aiter_bytes():
+                            yield chunk
+
+            return StreamingResponse(
+                stream_proxy(),
+                media_type="application/x-ndjson"
+            )
+        else:
+            # Regular response
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    f"{target_url}/api/chat",
+                    json=body
+                )
+                return Response(
+                    content=response.content,
+                    status_code=response.status_code,
+                    media_type="application/json"
+                )
+
+    except Exception as e:
+        logger.error(f"Error in chat routing: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"])
+async def proxy_ollama_api(request: Request, path: str):
+    """Pass-through proxy for Ollama API endpoints (except /api/chat which has routing)"""
+
+    # /api/chat is handled separately by chat_with_routing
+    if path == "chat":
+        raise HTTPException(status_code=500, detail="Should be handled by chat_with_routing")
+
+    target_url = f"{OLLAMA_CHAT_URL}/api/{path}"
+    logger.debug(f"Pass-through: {request.method} /api/{path} → {target_url}")
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Forward the request
+            response = await client.request(
+                method=request.method,
+                url=target_url,
+                content=await request.body(),
+                headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
+            )
+
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+
+    except Exception as e:
+        logger.error(f"Proxy error for /api/{path}: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
 
 @app.api_route("/healthz", methods=["GET", "HEAD"])
 async def health_check():
     """Health check endpoint"""
     health_status = {
         "service": "glados-orchestrator",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "status": "healthy",
-        "mode": "tool-provider",
+        "mode": "tool-provider + smart-routing",
         "letta_bridge": "unknown",
-        "tools_available": len(TOOL_DEFINITIONS)
+        "ollama_chat": "unknown",
+        "tools_available": len(TOOL_DEFINITIONS),
+        "routing": {
+            "simple_model": HERMES_MODEL,
+            "complex_model": QWEN_MODEL
+        }
     }
 
     try:
@@ -266,6 +435,16 @@ async def health_check():
                 health_status["letta_bridge"] = "unhealthy"
                 health_status["status"] = "degraded"
 
+            # Check Ollama connectivity
+            try:
+                resp = await client.get(f"{OLLAMA_CHAT_URL}/api/tags")
+                resp.raise_for_status()
+                health_status["ollama_chat"] = "healthy"
+            except httpx.HTTPError as e:
+                logger.warning(f"Health check - Ollama Chat error: {str(e)}")
+                health_status["ollama_chat"] = "unhealthy"
+                health_status["status"] = "degraded"
+
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
         health_status["status"] = "unhealthy"
@@ -278,19 +457,28 @@ async def root():
     """Root endpoint with service info"""
     return {
         "service": "GLaDOS Orchestrator",
-        "version": "2.0.0",
-        "mode": "tool-provider",
-        "description": "Provides specialized tools for Ollama LLM function calling",
+        "version": "2.1.0",
+        "mode": "tool-provider + smart-routing",
+        "description": "Tool endpoints and intelligent model routing for Ollama LLM",
         "endpoints": {
             "tools": "/tool/list",
             "get_time": "/tool/get_time",
             "letta_query": "/tool/letta_query",
             "execute_ha_skill": "/tool/execute_ha_skill",
-            "health": "/healthz"
+            "health": "/healthz",
+            "chat": "/api/chat (with smart routing)",
+            "ollama_api": "/api/* (pass-through to Ollama)"
         },
-        "usage": "Connect Home Assistant directly to Ollama, then configure Ollama to use these tool endpoints"
+        "routing": {
+            "simple_queries": f"{HERMES_MODEL} (fast, GLaDOS personality)",
+            "complex_queries": f"{QWEN_MODEL} (analytical reasoning)"
+        },
+        "usage": "Connect Home Assistant to this orchestrator. Chat queries will be automatically routed. Tools available via function calling."
     }
 
 if __name__ == "__main__":
     import uvicorn
+    logger.info(f"Starting GLaDOS Orchestrator v2.1")
+    logger.info(f"Routing: SIMPLE={HERMES_MODEL}, COMPLEX={QWEN_MODEL}")
+    logger.info(f"Ollama: {OLLAMA_CHAT_URL}")
     uvicorn.run(app, host="0.0.0.0", port=PORT)

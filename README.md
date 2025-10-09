@@ -146,7 +146,7 @@ docker exec -it hassistant-ollama ollama list
    - Model: `hermes3` or `qwen3:4b-instruct-2507-q4_K_M`
 4. Add Wyoming services:
    - **Whisper STT**: `tcp://hassistant-whisper:10300`
-   - **Piper TTS**: `tcp://hassistant-piper:10200`
+   - **Piper TTS**: `tcp://hassistant-piper-glados:10200`
 
 See [docs/setup/HA_OLLAMA_DIRECT_CONNECTION.md](docs/setup/HA_OLLAMA_DIRECT_CONNECTION.md) for tool integration and [docs/setup/HA_ASSIST_SETUP.md](docs/setup/HA_ASSIST_SETUP.md) for detailed configuration.
 

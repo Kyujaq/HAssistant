@@ -26,13 +26,14 @@ This roadmap provides a structured sequence for exercising the main features of 
 - [ ] Pi client microphone/speaker working or Assist dashboard microphone allowed in browser.
 
 ## 2. LLM Model Switching
-1. In Home Assistant, change the Assist prompt target between Hermes-3 and Qwen models.
-2. Send identical prompts to compare tone (Hermes) versus analytical detail (Qwen).
+1. In Home Assistant, change the Assist prompt target between Hermes-3 (fast, sarcastic) and Qwen3:4b (detailed, analytical).
+2. Send identical prompts to compare tone (Hermes-3 GLaDOS personality) versus analytical detail (Qwen).
 
 **Quick checklist**
-- [ ] Ollama modelfiles created (`Modelfile.hermes3`, `Modelfile.qwen`).
-- [ ] `docker exec hassistant-ollama ollama list` shows desired models in `loaded` state.
-- [ ] Adequate GPU memory free for both models.
+- [ ] Ollama modelfiles created (`Modelfile.hermes3`, `Modelfile.qwen`) in `ollama/modelfiles/`.
+- [ ] Models loaded on `ollama-chat` container: `docker exec -it ollama-chat ollama list` shows Hermes-3 and Qwen3:4b.
+- [ ] Vision model loaded on `ollama-vision` container: `docker exec -it ollama-vision ollama list` shows Qwen2.5-VL.
+- [ ] GPU allocation correct: `ollama-chat` on GPU 1 (1070), `ollama-vision` on GPU 0 (1080 Ti).
 
 ## 3. Memory Bridge Integration
 1. Start a conversation that stores a personal detail ("My favorite drink is cold brew").

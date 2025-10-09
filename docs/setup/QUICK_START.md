@@ -28,7 +28,7 @@ You have:
 1. **Settings** → **Devices & Services** → **+ Add Integration**
 2. Search for **"Wyoming Protocol"**
 3. Configure:
-   - **Host**: `hassistant-piper` (or `glad0s` or your server IP)
+   - **Host**: `hassistant-piper-glados` (or `glad0s` or your server IP)
    - **Port**: `10200`
 4. Click **Submit**
 5. You should see **"Wyoming Protocol - Piper"** added
@@ -115,7 +115,7 @@ curl http://localhost:10300
 ### "No text-to-speech integration found"
 ```bash
 # Check Piper is running
-docker logs hassistant-piper --tail 20
+docker logs hassistant-piper-glados --tail 20
 
 # Test Piper directly
 curl "http://localhost:10200/api/tts?text=Hello%20world"

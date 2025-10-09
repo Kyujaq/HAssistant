@@ -168,7 +168,7 @@ services:
    # volumes:
    #   - ./agent_data:/data
 
-  # GLaDOS Orchestrator - Tool Provider for Ollama LLM function calling
+  # GLaDOS Orchestrator v2.1 - Tool Provider + Smart Routing
   glados-orchestrator:
       build:
         context: ./services/glados-orchestrator
@@ -178,10 +178,18 @@ services:
         - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8000
         - LETTA_API_KEY=${BRIDGE_API_KEY:-dev-key}
         - PORT=8082
+        # Smart routing configuration
+        - OLLAMA_CHAT_URL=http://ollama-chat:11434
+        - OLLAMA_VISION_URL=http://ollama-vision:11434
+        - HERMES_MODEL=glados-hermes3
+        - QWEN_MODEL=qwen3:4b-instruct-2507-q4_K_M
+        - VISION_MODEL=qwen2.5vl:7b
       ports:
         - "8082:8082"
       depends_on:
         - letta-bridge
+        - ollama-chat
+        - ollama-vision
       restart: unless-stopped
       healthcheck:
         test: ["CMD", "curl", "-f", "http://localhost:8082/healthz"]
