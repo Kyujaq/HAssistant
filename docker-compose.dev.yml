@@ -1,0 +1,22 @@
+services:
+  glados-orchestrator:
+    build:
+      context: ./services/glados-orchestrator
+      dockerfile: Dockerfile
+    ports:
+      - "8082:8082"
+      - "5678:5678" # Debug port
+    volumes:
+      - ./services/glados-orchestrator:/app
+    env_file:
+      - .env
+    environment:
+      - DEBUGPY=1
+    command: python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m uvicorn main:app --host 0.0.0.0 --port 8082 --reload
+    networks:
+      - ha_network
+
+networks:
+  ha_network:
+    external: true
+    name: assistant_default

@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\ndocs: Enhance README and gitignore for better project documentation\n\n- Add comprehensive README with architecture, setup guides, and troubleshooting\n- Expand gitignore to protect SSH keys and exclude IDE/OS artifacts\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git commit:*)",
+      "Bash(curl:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker:*)",
+      "Bash(psql:*)",
+      "Bash(cat:*)",
+      "Bash(git push:*)",
+      "Bash(python3:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(wget:*)",
+      "Bash(git checkout:*)",
+      "Bash(git branch:*)",
+      "Bash(git merge:*)",
+      "Bash(sudo lsof:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

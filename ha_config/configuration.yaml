@@ -61,3 +61,9 @@ input_text:
 
 # Note: OpenAI Conversation must be configured via UI in Settings > Integrations
 # Configure it to use: http://hassistant-glados-orchestrator:8082/v1 with model "glados"
+
+logger:
+  default: info
+  logs:
+    homeassistant.components.assist_pipeline: debug
+    homeassistant.components.conversation: debug
