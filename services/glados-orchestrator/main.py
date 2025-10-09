@@ -48,6 +48,10 @@ LETTA_BRIDGE_URL = os.getenv("LETTA_BRIDGE_URL", "http://hassistant-letta-bridge
 LETTA_API_KEY = os.getenv("LETTA_API_KEY", "d6DkfuU7zPOpcoeAVabiNNPhTH6TcFrZ")
 PORT = int(os.getenv("PORT", "8082"))
 
+# Kitchen and Overnight API configuration
+KITCHEN_API_URL = os.getenv("KITCHEN_API_URL", "http://hassistant-kitchen-api:8083")
+OVERNIGHT_API_URL = os.getenv("OVERNIGHT_API_URL", "http://hassistant-overnight:8084")
+
 # Ollama configuration for routing
 OLLAMA_CHAT_URL = os.getenv("OLLAMA_CHAT_URL", "http://ollama-chat:11434")
 OLLAMA_VISION_URL = os.getenv("OLLAMA_VISION_URL", "http://ollama-vision:11434")
@@ -70,6 +74,16 @@ class ToolResponse(BaseModel):
 class LettaQueryRequest(BaseModel):
     query: str
     limit: int = 5
+
+class AddToGroceryListRequest(BaseModel):
+    item: str
+    quantity: Optional[int] = None
+    notes: Optional[str] = None
+
+class AddInventoryItemRequest(BaseModel):
+    name: str
+    quantity: int
+    expiry_date: Optional[str] = None
 
 class HASkillRequest(BaseModel):
     skill_name: str
@@ -135,6 +149,83 @@ TOOL_DEFINITIONS = [
                 },
                 "required": ["skill_name"]
             }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_to_grocery_list",
+            "description": "Add an item to the grocery list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item": {"type": "string", "description": "The item to add."},
+                    "quantity": {"type": "integer", "description": "The quantity of the item."},
+                    "notes": {"type": "string", "description": "Any notes for the item."}
+                },
+                "required": ["item"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_grocery_list",
+            "description": "Get the current grocery list.",
+            "parameters": { "type": "object", "properties": {} }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_recipes",
+            "description": "Get recipes from Paprika, optionally filtering by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Filter recipes by name."}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_inventory",
+            "description": "Get the current inventory.",
+            "parameters": { "type": "object", "properties": {} }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_inventory_item",
+            "description": "Add an item to the inventory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The name of the item."},
+                    "quantity": {"type": "integer", "description": "The quantity of the item."},
+                    "expiry_date": {"type": "string", "description": "The expiry date in YYYY-MM-DD format."}
+                },
+                "required": ["name", "quantity"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_overnight_cycle",
+            "description": "Manually start the overnight crew cycle for kitchen analysis.",
+            "parameters": { "type": "object", "properties": {} }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_overnight_cycle_status",
+            "description": "Get the status of the current or last overnight crew cycle.",
+            "parameters": { "type": "object", "properties": {} }
         }
     }
 ]
@@ -302,6 +393,112 @@ async def execute_ha_skill(request: HASkillRequest):
         return ToolResponse(success=True, data=result)
     except Exception as e:
         logger.error(f"Error in execute_ha_skill: {str(e)}")
+        return ToolResponse(success=False, error=str(e))
+
+# Kitchen API Tool Endpoints
+
+@app.post("/tool/add_to_grocery_list")
+async def add_to_grocery_list(request: AddToGroceryListRequest):
+    """Add an item to the grocery list via kitchen-api."""
+    try:
+        logger.info(f"add_to_grocery_list called with item: {request.item}")
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{KITCHEN_API_URL}/grocery-list",
+                json=request.dict()
+            )
+            response.raise_for_status()
+            return ToolResponse(success=True, data=response.json())
+    except Exception as e:
+        logger.error(f"Error in add_to_grocery_list: {str(e)}")
+        return ToolResponse(success=False, error=str(e))
+
+@app.get("/tool/get_grocery_list")
+@app.post("/tool/get_grocery_list")
+async def get_grocery_list():
+    """Get the grocery list from kitchen-api."""
+    try:
+        logger.info("get_grocery_list called")
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{KITCHEN_API_URL}/grocery-list")
+            response.raise_for_status()
+            return ToolResponse(success=True, data=response.json())
+    except Exception as e:
+        logger.error(f"Error in get_grocery_list: {str(e)}")
+        return ToolResponse(success=False, error=str(e))
+
+@app.get("/tool/get_recipes")
+@app.post("/tool/get_recipes")
+async def get_recipes(name: Optional[str] = None):
+    """Get recipes from kitchen-api."""
+    try:
+        logger.info(f"get_recipes called with name: {name}")
+        params = {"name": name} if name else {}
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{KITCHEN_API_URL}/recipes", params=params)
+            response.raise_for_status()
+            return ToolResponse(success=True, data=response.json())
+    except Exception as e:
+        logger.error(f"Error in get_recipes: {str(e)}")
+        return ToolResponse(success=False, error=str(e))
+
+@app.get("/tool/get_inventory")
+@app.post("/tool/get_inventory")
+async def get_inventory():
+    """Get inventory from kitchen-api."""
+    try:
+        logger.info("get_inventory called")
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{KITCHEN_API_URL}/inventory/items")
+            response.raise_for_status()
+            return ToolResponse(success=True, data=response.json())
+    except Exception as e:
+        logger.error(f"Error in get_inventory: {str(e)}")
+        return ToolResponse(success=False, error=str(e))
+
+@app.post("/tool/add_inventory_item")
+async def add_inventory_item(request: AddInventoryItemRequest):
+    """Add an item to the inventory via kitchen-api."""
+    try:
+        logger.info(f"add_inventory_item called with item: {request.name}")
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{KITCHEN_API_URL}/inventory/items",
+                json=request.dict()
+            )
+            response.raise_for_status()
+            return ToolResponse(success=True, data=response.json())
+    except Exception as e:
+        logger.error(f"Error in add_inventory_item: {str(e)}")
+        return ToolResponse(success=False, error=str(e))
+
+# Overnight API Tool Endpoints
+
+@app.post("/tool/start_overnight_cycle")
+async def start_overnight_cycle():
+    """Manually start the overnight cycle via overnight-api."""
+    try:
+        logger.info("start_overnight_cycle called")
+        async with httpx.AsyncClient() as client:
+            response = await client.post(f"{OVERNIGHT_API_URL}/cycle/start")
+            response.raise_for_status()
+            return ToolResponse(success=True, data=response.json())
+    except Exception as e:
+        logger.error(f"Error in start_overnight_cycle: {str(e)}")
+        return ToolResponse(success=False, error=str(e))
+
+@app.get("/tool/get_overnight_cycle_status")
+@app.post("/tool/get_overnight_cycle_status")
+async def get_overnight_cycle_status():
+    """Get the status of the overnight cycle from overnight-api."""
+    try:
+        logger.info("get_overnight_cycle_status called")
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{OVERNIGHT_API_URL}/cycle/status")
+            response.raise_for_status()
+            return ToolResponse(success=True, data=response.json())
+    except Exception as e:
+        logger.error(f"Error in get_overnight_cycle_status: {str(e)}")
         return ToolResponse(success=False, error=str(e))
 
 # Smart Routing Endpoints
@@ -499,6 +696,8 @@ async def health_check():
         "mode": "unified-voice-architecture",
         "letta_bridge": "unknown",
         "ollama_chat": "unknown",
+        "kitchen_api": "unknown",
+        "overnight_api": "unknown",
         "tools_available": len(TOOL_DEFINITIONS),
         "routing": {
             "simple_model": HERMES_MODEL,
@@ -519,6 +718,26 @@ async def health_check():
             except httpx.HTTPError as e:
                 logger.warning(f"Health check - Letta Bridge error: {str(e)}")
                 health_status["letta_bridge"] = "unhealthy"
+                health_status["status"] = "degraded"
+
+            # Check Kitchen API
+            try:
+                resp = await client.get(f"{KITCHEN_API_URL}/healthz")
+                resp.raise_for_status()
+                health_status["kitchen_api"] = "healthy"
+            except httpx.HTTPError as e:
+                logger.warning(f"Health check - Kitchen API error: {str(e)}")
+                health_status["kitchen_api"] = "unhealthy"
+                health_status["status"] = "degraded"
+
+            # Check Overnight API
+            try:
+                resp = await client.get(f"{OVERNIGHT_API_URL}/healthz")
+                resp.raise_for_status()
+                health_status["overnight_api"] = "healthy"
+            except httpx.HTTPError as e:
+                logger.warning(f"Health check - Overnight API error: {str(e)}")
+                health_status["overnight_api"] = "unhealthy"
                 health_status["status"] = "degraded"
 
             # Check Ollama connectivity
@@ -551,6 +770,8 @@ async def root():
             "get_time": "/tool/get_time",
             "letta_query": "/tool/letta_query",
             "execute_ha_skill": "/tool/execute_ha_skill",
+            "kitchen_api": "/tool/* (e.g., /tool/add_to_grocery_list)",
+            "overnight_api": "/tool/* (e.g., /tool/start_overnight_cycle)",
             "health": "/healthz",
             "chat": "/api/chat (with smart routing)",
             "ollama_api": "/api/* (pass-through to Ollama)"
@@ -567,4 +788,6 @@ if __name__ == "__main__":
     logger.info(f"Starting GLaDOS Orchestrator v2.2 - Unified Voice Architecture")
     logger.info(f"Routing: SIMPLE={HERMES_MODEL} (direct), COMPLEX={QWEN_MODEL}→{HERMES_MODEL} (handoff)")
     logger.info(f"Ollama: {OLLAMA_CHAT_URL}")
+    logger.info(f"Kitchen API: {KITCHEN_API_URL}")
+    logger.info(f"Overnight API: {OVERNIGHT_API_URL}")
     uvicorn.run(app, host="0.0.0.0", port=PORT)

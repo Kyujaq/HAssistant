@@ -1,0 +1,17 @@
+# Vision Intake Module Requirements
+# For processing images of groceries
+
+# Image processing
+opencv-python>=4.8.0
+
+# Barcode detection and decoding
+pyzbar>=0.1.9
+
+# OCR (Optical Character Recognition)
+pytesseract>=0.3.10
+
+# Additional image processing utilities
+Pillow>=10.0.0
+
+# Numpy for array operations
+numpy>=1.24.0

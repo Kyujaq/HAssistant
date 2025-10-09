@@ -175,15 +175,16 @@ services:
         dockerfile: Dockerfile
       container_name: hassistant-glados-orchestrator
       environment:
-        - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8000
-        - LETTA_API_KEY=${BRIDGE_API_KEY:-dev-key}
-        - PORT=8082
-        # Smart routing configuration
+        - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8081
+        - LETTA_API_KEY=${LETTA_API_KEY}
         - OLLAMA_CHAT_URL=http://ollama-chat:11434
         - OLLAMA_VISION_URL=http://ollama-vision:11434
-        - HERMES_MODEL=glados-hermes3
-        - QWEN_MODEL=qwen3:4b-instruct-2507-q4_K_M
-        - VISION_MODEL=qwen2.5vl:7b
+        - HERMES_MODEL=${HERMES_MODEL:-glados-hermes3}
+        - QWEN_MODEL=${QWEN_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
+        - VISION_MODEL=${VISION_MODEL:-qwen2.5vl:7b}
+        - PORT=8082
+        - KITCHEN_API_URL=http://hassistant-kitchen-api:8083
+        - OVERNIGHT_API_URL=http://hassistant-overnight:8084
       ports:
         - "8082:8082"
       depends_on:
@@ -468,7 +469,62 @@ services:
   #   networks:
   #     - ha_network
 
+  overnight:
+    build: ./overnight
+    container_name: hassistant-overnight
+    env_file: .env
+    ports:
+      - "8084:8000"
+    volumes:
+      - ./overnight/artifacts:/data/artifacts
+    depends_on:
+      - letta-bridge
+      - glados-orchestrator
+      - ollama-chat
+    restart: unless-stopped
+    networks:
+      - ha_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
+  kitchen-api:
+    build:
+      context: ./services/kitchen-api
+    ports:
+      - "8083:8083"
+    volumes:
+      - ./services/kitchen-api/data:/app/data
+    networks:
+      - assistant_default
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  piper-glados:
+    container_name: hassistant-piper-glados
+    image: rhasspy/wyoming-piper:latest
+    runtime: nvidia
+    command: --voice en_US-glados-medium --uri 'tcp://0.0.0.0:10200' --data-dir /data --piper /usr/share/piper/piper --streaming
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+              device_ids: ['1']  # GPU 1 → GTX 1070 (share with Whisper)
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=1
+    volumes:
+      - ./piper_data:/data
+    ports:
+      - "10200:10200"
+    restart: unless-stopped
+    networks:
+      - ha_network
 
 volumes:
   postgres_data:

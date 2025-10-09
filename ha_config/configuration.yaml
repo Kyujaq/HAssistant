@@ -67,3 +67,12 @@ logger:
   logs:
     homeassistant.components.assist_pipeline: debug
     homeassistant.components.conversation: debug
+
+rest:
+  - resource: http://hassistant-kitchen-api:8083/inventory/current
+    scan_interval: 300 # Updates every 5 minutes
+    sensor:
+      - name: "Kitchen Inventory"
+        value_template: "{{ value_json | length }}" # State will be the count of items
+        json_attributes:
+          - "data" # Store the entire list in an attribute named "data"
