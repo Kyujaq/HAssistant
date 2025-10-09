@@ -56,7 +56,7 @@ services:
     image: rhasspy/wyoming-piper:latest
     container_name: hassistant-piper-glados
     runtime: nvidia
-    command: --voice en_US-glados-medium --uri 'tcp://0.0.0.0:10200' --data-dir /data --piper /usr/share/piper/piper
+    command: --voice en_US-glados-high --uri 'tcp://0.0.0.0:10200' --data-dir /data --piper /usr/share/piper/piper
     deploy:
       resources:
         reservations:
@@ -291,8 +291,8 @@ services:
       - ha_network
 
   # Your ollama containers should already exist:
-  # - ollama-chat on GPU0 (11434) with Qwen3-* for chat
-  # - ollama-vision on GPU1 (11435->11434 in container) with qwen2.5vl:7b
+  # - ollama-chat on GPU1 (1070, port 11434) with Hermes-3 and Qwen3:4b for chat
+  # - ollama-vision on GPU0 (1080 Ti, port 11435->11434 in container) with Qwen2.5-VL for vision
   # Ensure they're reachable as ollama-chat / ollama-vision or use host IPs.
   
   ollama-chat:
@@ -304,12 +304,12 @@ services:
         reservations:
           devices:
             - capabilities: [gpu]
-              device_ids: ['0']   # GPU 0 → 1080 Ti
+              device_ids: ['1']   # GPU 1 → GTX 1070 (Hermes-3, Qwen3:4b)
     ports:
       - "11434:11434"
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
-      - NVIDIA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=1
     volumes:
       - ollama_chat_data:/root/.ollama
       - ./ollama/modelfiles:/root/.ollama/modelfiles:ro
@@ -327,12 +327,12 @@ services:
         reservations:
           devices:
             - capabilities: [gpu]
-              device_ids: ['0']   # GPU 0 → GTX 1080 Ti (11GB - fits 8.6GB model)
+              device_ids: ['0']   # GPU 0 → GTX 1080 Ti (11GB for Qwen2.5-VL)
     ports:
       - "11435:11434"
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
-      - NVIDIA_VISIBLE_DEVICES=1
+      - NVIDIA_VISIBLE_DEVICES=0
     volumes:
       - ollama_vision_data:/root/.ollama
       - ./ollama/modelfiles:/root/.ollama/modelfiles:ro
@@ -340,7 +340,22 @@ services:
     restart: unless-stopped
     networks:
       - ha_network
-  
+
+  # ---- POC: Smart Routing Proxy (Testing) ---- #
+  poc-smart-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.poc-proxy
+    container_name: poc-smart-proxy
+    ports:
+      - "8090:8090"
+    depends_on:
+      - ollama-chat
+      - ollama-vision
+    restart: unless-stopped
+    networks:
+      - ha_network
+
    # ---- NEW: Face Recognition Stack ---- #
 
   # Double Take: Orchestrates face recognition between Frigate and CompreFace

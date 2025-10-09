@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install --no-cache-dir httpx fastapi uvicorn
+
+# Copy POC proxy script
+COPY poc_smart_proxy.py /app/
+
+# Expose port
+EXPOSE 8090
+
+# Run proxy
+CMD ["python3", "poc_smart_proxy.py"]
