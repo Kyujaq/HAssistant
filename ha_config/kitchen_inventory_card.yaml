@@ -1,0 +1,19 @@
+type: markdown
+title: 🍽️ Kitchen Inventory
+content: |
+  {% set items = state_attr('sensor.kitchen_inventory', 'data') %}
+  {% if items %}
+  {% for item in items %}
+  **{{ item.name }}** {% if item.brand %}({{ item.brand }}){% endif %}
+  - 📦 Qty: {{ item.quantity }} {{ item.unit }}
+  - 📍 Location: {{ item.location }}
+  - 📅 Purchased: {{ item.purchase_date }}
+  - ⏰ Expires: {{ item.expiration_date }}
+  {% if item.category %}- 🏷️ Category: {{ item.category }}{% endif %}
+  ---
+  {% endfor %}
+
+  **Total Items:** {{ items | length }}
+  {% else %}
+  _No inventory items found_
+  {% endif %}

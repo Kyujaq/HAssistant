@@ -1,6 +1,7 @@
 import os, re, time, threading, base64
 from collections import deque
 from typing import List, Dict, Any, Tuple
+from contextlib import asynccontextmanager
 
 import numpy as np
 import cv2
@@ -60,6 +61,17 @@ HDMI_RESIZE_LONG = int(os.getenv("HDMI_RESIZE_LONG", "1280"))
 
 # ---------------------- App ----------------------
 app = FastAPI(title="Vision Gateway (Native ROI + Masked Matching)")
+
+@app.on_event("startup")
+async def startup_event():
+    """Start HDMI capture thread on startup"""
+    # Force rebuild
+    if HDMI_ENABLED:
+        print("Starting HDMI capture loop in background thread...", flush=True)
+        hdmi_thread = threading.Thread(target=hdmi_loop, daemon=True)
+        hdmi_thread.start()
+    else:
+        print("HDMI capture is disabled.", flush=True)
 
 def b64_jpg(img: np.ndarray, q: int = 90) -> str:
     ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), q])
