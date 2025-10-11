@@ -13,13 +13,16 @@ from typing import Type
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, validator
 
-# Ensure repository root is available for shared helpers
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.append(str(REPO_ROOT))
+# Ensure shared modules are available (mounted as /shared in Docker)
+# In Docker: /shared is mounted from host ./shared directory
+# Add /shared and /clients to path
+if "/shared" not in sys.path:
+    sys.path.append("/shared")
+if "/clients" not in sys.path:
+    sys.path.append("/clients")
 
-from shared.voice import WindowsVoiceExecutor
-from shared.vision import VisionGatewayClient
+from voice import WindowsVoiceExecutor
+from vision import VisionGatewayClient
 
 # Logging
 logger = logging.getLogger("crew-orchestrator.tools")

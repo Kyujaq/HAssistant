@@ -32,6 +32,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 RUN useradd -m -u 1000 crewuser && chown -R crewuser:crewuser /app
 USER crewuser
 
-EXPOSE 8084
+EXPOSE ${PORT}
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8084", "--log-level", "info"]
+CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT} --log-level info"

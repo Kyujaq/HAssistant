@@ -197,5 +197,7 @@ async def kickoff_task(task: CrewTask) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
+    import os
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8084)
+    port = int(os.getenv("PORT", "8085"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
