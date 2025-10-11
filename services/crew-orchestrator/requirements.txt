@@ -1,0 +1,19 @@
+# Crew Orchestrator Requirements
+
+# CrewAI framework for multi-agent orchestration
+crewai>=0.41.0
+crewai-tools>=0.8.0
+
+# FastAPI for REST API
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+
+# HTTP client for service communication
+requests>=2.31.0
+
+# Logging and monitoring
+python-json-logger>=2.0.7
+
+# Environment management
+python-dotenv>=1.0.0

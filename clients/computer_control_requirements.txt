@@ -1,0 +1,13 @@
+# Computer Control Agent Requirements
+# Install with: pip install -r computer_control_requirements.txt
+
+# Core dependencies
+pyautogui>=0.9.53          # Mouse and keyboard automation
+pytesseract>=0.3.10        # OCR for screen text recognition
+Pillow>=10.0.0             # Image processing
+opencv-python>=4.8.0       # Computer vision
+numpy>=1.24.0              # Array operations
+requests>=2.31.0           # HTTP client
+
+# Optional: for additional features
+psutil>=5.9.0              # System monitoring
