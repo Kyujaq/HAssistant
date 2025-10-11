@@ -83,9 +83,13 @@ Memory is **opt-in** via the `letta_query` tool (not automatically loaded for al
 - `permanent`: Never evicted (pinned)
 
 **Storage**:
-- PostgreSQL with pgvector for semantic search
+- PostgreSQL with pgvector for semantic search (384-dimensional vectors)
 - Redis for session caching
-- ⚠️ **Production Warning**: Letta Bridge uses fake embeddings (random vectors). Replace `fake_embed()` in `services/letta-bridge/main.py` with a real embedding model (e.g., sentence-transformers, OpenAI).
+- ✅ **Embeddings**: Letta Bridge uses sentence-transformers (all-MiniLM-L6-v2) for real semantic embeddings
+  - Model: all-MiniLM-L6-v2 (~80MB, optimized for semantic search)
+  - Dimension: 384 (matches pgvector schema)
+  - Performance: ~10-50ms per text on CPU
+  - Quality: Excellent for general semantic search
 
 **Database Initialization**: `scripts/*.sql` files auto-run on postgres startup:
 1. `01_enable_pgvector.sql`: Enable pgvector extension

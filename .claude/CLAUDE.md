@@ -11,9 +11,10 @@
 
      Known Issues & Important Warnings
 
-     - Letta Bridge uses fake_embed() for embeddings - this is a known placeholder that needs replacement with real embedding model in production
      - Port allocations avoid conflicts: postgres on 5432, redis on 6380 (to avoid conflicts with other instances)
      - NVIDIA_VISIBLE_DEVICES in docker-compose.yml sometimes conflicts with device_ids declarations
+     - Redis password uses special characters that required URL encoding in LETTA_REDIS_URL connection string
+     - When recreating postgres/redis containers, they may retain old data volumes with old passwords (requires manual password reset)
 
      Development Workflow
 
@@ -27,6 +28,7 @@
      - Orchestrator refactored to v2.0: proxy → tool provider (46% code reduction)
      - Folder reorganization: files moved from root to services/, clients/, docs/, examples/, tests/, config/
      - HA Ollama integration URL changed from orchestrator:8082 to ollama-chat:11434
+     - Embedding migration (Oct 2025): Replaced fake_embed() with sentence-transformers (all-MiniLM-L6-v2, 384-dim) for real semantic search
 
      User Memory (Cross-project preferences)
 
