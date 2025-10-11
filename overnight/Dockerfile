@@ -18,5 +18,8 @@ RUN mkdir -p /data/artifacts
 # Expose the port the app runs on
 EXPOSE 8000
 
-# Run the application using the __main__.py entrypoint
-CMD ["uvicorn", "overnight.api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Set PYTHONPATH to allow absolute imports
+ENV PYTHONPATH=/app
+
+# Run the application
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]

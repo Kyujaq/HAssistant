@@ -6,6 +6,8 @@ requests==2.32.3
 numpy==1.26.4
 opencv-contrib-python-headless==4.10.0.84
 scikit-image==0.24.0
+imagehash>=4.3.1
+prometheus-client>=0.19.0
 
 
 # Paddle stack for py3.11 - using newer versions to avoid PyMuPDF build issues

@@ -8,8 +8,11 @@ import asyncpg
 import redis.asyncio as aioredis
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Header, Query
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 import numpy as np
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+import time
 
 # --------------------
 # ENV & CONFIG
@@ -33,6 +36,35 @@ TIER_MAP = {
 # FastAPI
 # --------------------
 app = FastAPI(title="Letta Bridge", version="0.1.0")
+
+# --------------------
+# Prometheus Metrics
+# --------------------
+memory_operations = Counter(
+    'memory_operations_total',
+    'Total memory operations',
+    ['operation', 'tier']  # operation: add, search, pin, forget, maintenance
+)
+
+memory_latency = Histogram(
+    'memory_operation_latency_ms',
+    'Memory operation latency in milliseconds',
+    ['operation', 'tier'],
+    buckets=[10, 50, 100, 500, 1000, 5000]
+)
+
+embedding_operations = Counter(
+    'embedding_operations_total',
+    'Total embedding computations',
+    ['operation']  # embed_text, embed_search
+)
+
+db_query_latency = Histogram(
+    'db_query_latency_ms',
+    'Database query latency',
+    ['query_type'],  # insert, select, update, vector_search
+    buckets=[1, 5, 10, 50, 100, 500, 1000]
+)
 
 async def get_pg():
     pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=5)
@@ -92,31 +124,34 @@ class SearchOutItem(BaseModel):
     source: List[str] = []
 
 # --------------------
-# Embeddings (placeholder)
-# ⚠️  PRODUCTION WARNING: Replace fake_embed() with real embedding model!
+# Real Embeddings - sentence-transformers
 # --------------------
-def fake_embed(text: str, dim: int = EMBED_DIM) -> List[float]:
+from sentence_transformers import SentenceTransformer
+
+# Load model at startup (cached in container after first load)
+# Model: all-MiniLM-L6-v2 (384-dim, ~80MB, optimized for semantic search)
+print("Loading sentence-transformers model (all-MiniLM-L6-v2)...", flush=True)
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+print(f"✅ Embedding model loaded. Dimension: {EMBED_DIM}", flush=True)
+
+def embed_text(text: str) -> List[float]:
     """
-    ⚠️  WARNING: DO NOT use in production!
-    
-    This is a deterministic pseudo-embedding for development/testing only.
-    
-    Replace with a real embedding model before deploying to production:
-    - sentence-transformers (all-MiniLM-L6-v2, all-mpnet-base-v2)
-    - OpenAI ada-002
-    - Ollama embeddings (via API or local model)
-    - Hugging Face embeddings
-    
-    Example replacement with sentence-transformers:
-        from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer('all-MiniLM-L6-v2')
-        def real_embed(text: str) -> List[float]:
-            return model.encode(text).tolist()
+    Generate semantic embeddings using sentence-transformers.
+
+    Model: all-MiniLM-L6-v2
+    - Dimension: 384
+    - Speed: ~10-50ms per text on CPU
+    - Quality: Excellent for general semantic search
+
+    Args:
+        text: Text to embed (titles, content, search queries)
+
+    Returns:
+        384-dimensional embedding vector normalized to unit length
     """
-    rng = np.random.default_rng(abs(hash(text)) % (2**32))
-    v = rng.standard_normal(dim)
-    v = v / (np.linalg.norm(v) + 1e-9)
-    return v.astype(np.float32).tolist()
+    # show_progress_bar=False disables tqdm output for cleaner logs
+    embedding = embedding_model.encode(text, show_progress_bar=False, convert_to_numpy=True)
+    return embedding.tolist()
 
 # --------------------
 # Routes
@@ -132,11 +167,16 @@ async def add_memory(
     pg=Depends(get_pg),
     redis=Depends(get_redis),
 ):
+    start_time = time.time()
     now = datetime.now(timezone.utc)
     db_tier = TIER_MAP.get(body.tier, "short_term")
 
+    # Track operation
+    memory_operations.labels(operation='add', tier=db_tier).inc()
+
     async with pg.acquire() as conn:
         async with conn.transaction():
+            insert_start = time.time()
             mem_id = await conn.fetchval(
                 """
                 INSERT INTO memory_blocks
@@ -148,11 +188,17 @@ async def add_memory(
                 uuid.uuid4(), body.type, body.title, body.content, body.tags, body.source,
                 body.confidence, now, now, db_tier, body.pin, json.dumps(body.meta)
             )
+            db_query_latency.labels(query_type='insert').observe((time.time() - insert_start) * 1000)
 
             if body.generate_embedding:
-                emb = fake_embed(body.title + "\n" + body.content, EMBED_DIM)
+                emb_start = time.time()
+                emb = embed_text(body.title + "\n" + body.content)
+                embedding_operations.labels(operation='embed_text').inc()
+
                 # Convert list to pgvector format string
                 emb_str = '[' + ','.join(map(str, emb)) + ']'
+
+                insert_emb_start = time.time()
                 await conn.execute(
                     """
                     INSERT INTO memory_embeddings (memory_id, embedding)
@@ -161,6 +207,11 @@ async def add_memory(
                     """,
                     mem_id, emb_str
                 )
+                db_query_latency.labels(query_type='insert').observe((time.time() - insert_emb_start) * 1000)
+
+    # Track total latency
+    total_latency = (time.time() - start_time) * 1000
+    memory_latency.labels(operation='add', tier=db_tier).observe(total_latency)
 
     # small ephemeral marker in Redis (optional)
     await redis.setex(f"cooldown:mem_add:{mem_id}", 60, "1")
@@ -196,6 +247,8 @@ async def memory_search(
     _=Depends(auth),
     pg=Depends(get_pg)
 ):
+    start_time = time.time()
+
     # Map API tier names to database tier names
     tiers_list = None
     if tiers:
@@ -204,10 +257,17 @@ async def memory_search(
 
     types_list = [t.strip() for t in types.split(",")] if types else None
 
+    # Track search operation
+    tier_label = tiers_list[0] if tiers_list and len(tiers_list) == 1 else 'mixed'
+    memory_operations.labels(operation='search', tier=tier_label).inc()
+
     # text match + optional vector
     async with pg.acquire() as conn:
         # vector part
-        emb = fake_embed(q, EMBED_DIM)
+        emb_start = time.time()
+        emb = embed_text(q)
+        embedding_operations.labels(operation='embed_search').inc()
+
         # Convert list to pgvector format string
         emb_str = '[' + ','.join(map(str, emb)) + ']'
         filters = []
@@ -220,6 +280,7 @@ async def memory_search(
             params.append(types_list)
         where = ("WHERE " + " AND ".join(filters)) if filters else ""
 
+        search_start = time.time()
         rows = await conn.fetch(
             f"""
             SELECT mb.id, mb.title, left(mb.content, 200) AS preview, mb.type, mb.tier,
@@ -233,6 +294,12 @@ async def memory_search(
             """,
             *params
         )
+        db_query_latency.labels(query_type='vector_search').observe((time.time() - search_start) * 1000)
+
+    # Track total latency
+    total_latency = (time.time() - start_time) * 1000
+    memory_latency.labels(operation='search', tier=tier_label).observe(total_latency)
+
     return [
         SearchOutItem(
             id=str(r["id"]), title=r["title"], preview=r["preview"], type=r["type"],
@@ -292,7 +359,16 @@ async def memory_maintenance(_=Depends(auth), pg=Depends(get_pg)):
 
 @app.get("/metrics")
 async def metrics():
-    return {"uptime": "ok"}  # stub; add real metrics later
+    """
+    Prometheus metrics endpoint for letta-bridge.
+
+    Exposes:
+    - memory_operations_total{operation, tier}: Memory operation counts
+    - memory_operation_latency_ms{operation, tier}: Operation latency histogram
+    - embedding_operations_total{operation}: Embedding computation counts
+    - db_query_latency_ms{query_type}: Database query latency histogram
+    """
+    return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 if __name__ == "__main__":
     import sys
@@ -303,17 +379,12 @@ if __name__ == "__main__":
     print("🚀 Starting Letta Bridge API Server")
     print("=" * 70)
     
-    # Warn about fake embedding function
-    warnings.warn(
-        "\n" + "!" * 70 + "\n"
-        "⚠️  PRODUCTION WARNING: Using fake_embed() placeholder function!\n"
-        "   This is for development/testing only.\n"
-        "   Replace with a real embedding model before production deployment.\n"
-        "   See letta_bridge/main.py for implementation examples.\n"
-        + "!" * 70,
-        UserWarning,
-        stacklevel=2
-    )
+    # Log embedding model info
+    print("=" * 70)
+    print("✅ Using REAL embeddings: sentence-transformers (all-MiniLM-L6-v2)")
+    print(f"   - Dimension: {EMBED_DIM}")
+    print(f"   - Model loaded at startup for fast inference")
+    print("=" * 70)
     
     # Warn about default API key
     if API_KEY == "dev-key":

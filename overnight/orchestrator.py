@@ -12,21 +12,45 @@ import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
+from pathlib import Path
 import uuid
 
-from .schemas import (
-    Task, TaskStatus, TaskPriority,
-    EnrichmentTask, ConsolidationTask, CalendarTask
-)
-from .crews import (
-    InformationEnrichmentCrew,
-    MemoryConsolidationCrew,
-    ProactivePlanningCrew,
-    PatternAnalysisCrew,
-    KitchenCrew
-)
-from .tools import calendar_tools, memory_tools
-from .guards import GuardRails
+try:
+    from .schemas import (
+        Task,
+        TaskStatus,
+        TaskPriority,
+        EnrichmentTask,
+        ConsolidationTask,
+        CalendarTask,
+    )
+    from .crews import (
+        InformationEnrichmentCrew,
+        MemoryConsolidationCrew,
+        ProactivePlanningCrew,
+        PatternAnalysisCrew,
+        KitchenCrew,
+    )
+    from .tools import calendar_tools, memory_tools
+    from .guards import GuardRails
+except ImportError:
+    from schemas import (  # type: ignore[no-redef]
+        Task,
+        TaskStatus,
+        TaskPriority,
+        EnrichmentTask,
+        ConsolidationTask,
+        CalendarTask,
+    )
+    from crews import (  # type: ignore[no-redef]
+        InformationEnrichmentCrew,
+        MemoryConsolidationCrew,
+        ProactivePlanningCrew,
+        PatternAnalysisCrew,
+        KitchenCrew,
+    )
+    from tools import calendar_tools, memory_tools  # type: ignore[no-redef]
+    from guards import GuardRails  # type: ignore[no-redef]
 
 # Configure logging
 logging.basicConfig(

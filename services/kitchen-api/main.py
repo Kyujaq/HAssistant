@@ -1,4 +1,3 @@
-```python
 # services/kitchen-api/main.py
 from fastapi import FastAPI, HTTPException, Depends, Body
 from typing import List, Optional, Dict, Any
@@ -7,10 +6,9 @@ import os
 from pydantic import BaseModel
 
 # Import module clients/data access layers
-from .db import data_access as db
-from .paprika_bridge.kappari_client import KappariClient
-from .vision import intake as vision_intake
-from .deals.providers.mock_ca import MockCADealsProvider
+from db import data_access as db
+from paprika_bridge.kappari_client import KappariClient
+from deals.providers.mock_ca import MockCAProvider
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,7 +21,7 @@ app = FastAPI(
 
 # --- Module Initializations ---
 paprika_client = KappariClient()
-deals_provider = MockCADealsProvider()
+deals_provider = MockCAProvider()
 
 # --- Pydantic Models for Request/Response Bodies ---
 class Item(BaseModel):
@@ -150,7 +148,8 @@ async def get_expiring_items(days: int = 7):
 async def get_current_inventory():
     """Retrieves the full current inventory of all items with quantity > 0."""
     try:
-        return db.get_current_inventory()
+        inventory = db.get_current_inventory()
+        return {"data": inventory, "count": len(inventory)}
     except Exception as e:
         logger.error(f"Failed to get current inventory: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -195,14 +194,20 @@ async def add_to_grocery_list(item_name: str = Body(..., embed=True)):
 async def scan_receipt(image: ImagePath):
     """
     Processes a grocery receipt image to extract items.
-    Note: This is a placeholder and needs a real image path handling mechanism.
+    Note: Vision features are currently disabled (dependencies not installed).
     """
     try:
+        # Lazy-load vision module (will fail gracefully if deps not installed)
+        from vision import intake as vision_intake
+
         # In a real scenario, the image would be uploaded or a path on a shared volume provided.
         if not os.path.exists(image.path):
             raise HTTPException(status_code=404, detail=f"Image not found at path: {image.path}")
         result = vision_intake.process_image(image.path)
         return result
+    except ImportError as e:
+        logger.warning(f"Vision dependencies not installed: {e}")
+        raise HTTPException(status_code=501, detail="Vision features are not currently available. Install opencv-python, pytesseract, and pyzbar to enable.")
     except Exception as e:
         logger.error(f"Failed to process image: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -218,4 +223,3 @@ async def find_deals(items: List[str] = Body(..., embed=True), postal_code: str 
     except Exception as e:
         logger.error(f"Failed to find deals: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-```

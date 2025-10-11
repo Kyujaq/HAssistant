@@ -1,15 +1,17 @@
-```python
 # overnight/api.py
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 import logging
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import os
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from .orchestrator import OvernightOrchestrator
+try:
+    from .orchestrator import OvernightOrchestrator
+except ImportError:
+    from orchestrator import OvernightOrchestrator  # type: ignore[no-redef]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,8 +22,15 @@ app = FastAPI(
     version="0.1.0",
 )
 
+ENABLE_INTERNAL_SCHEDULER = os.getenv("ENABLE_INTERNAL_SCHEDULER", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
 orchestrator = OvernightOrchestrator()
-scheduler = AsyncIOScheduler()
+scheduler: Optional[AsyncIOScheduler] = AsyncIOScheduler() if ENABLE_INTERNAL_SCHEDULER else None
 
 # In-memory store for task status
 # For a more robust solution, a database or Redis could be used.
@@ -55,9 +64,15 @@ async def startup_event():
     """
     On startup, schedule the nightly run.
     """
+    if not ENABLE_INTERNAL_SCHEDULER:
+        logger.info("Internal scheduler disabled; external automation should trigger /run-cycle.")
+        return
+
     schedule_hour = int(os.getenv("OVERNIGHT_SCHEDULE_HOUR", "2"))
     logger.info(f"Scheduling nightly overnight cycle to run at {schedule_hour}:00 local time.")
     
+    assert scheduler is not None  # For type checkers
+
     scheduler.add_job(
         run_cycle_background,
         trigger=CronTrigger(hour=schedule_hour, minute=0),
@@ -73,8 +88,9 @@ async def shutdown_event():
     """
     On shutdown, stop the scheduler.
     """
-    logger.info("Scheduler shutting down.")
-    scheduler.shutdown()
+    if scheduler:
+        logger.info("Scheduler shutting down.")
+        scheduler.shutdown()
 
 @app.post("/run-cycle", status_code=202, tags=["Lifecycle"])
 async def trigger_overnight_cycle(background_tasks: BackgroundTasks):
@@ -107,4 +123,3 @@ async def health_check():
     """Health check endpoint."""
     return {"status": "ok"}
 
-```

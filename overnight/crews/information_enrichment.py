@@ -9,10 +9,10 @@ import uuid
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from ..schemas import EnrichmentTask, EnrichmentResult, WebSearchResult, Artifact
-from ..tools import web_tools, memory_tools
-from ..artifacts import ArtifactManager
-from ..guards import GuardRails
+from schemas import EnrichmentTask, EnrichmentResult, WebSearchResult, Artifact
+from tools import web_tools, memory_tools
+from artifacts import ArtifactManager
+from guards import GuardRails
 
 logger = logging.getLogger(__name__)
 

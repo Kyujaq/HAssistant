@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 import uuid
 
-from .schemas import Artifact
+from schemas import Artifact
 
 logger = logging.getLogger(__name__)
 

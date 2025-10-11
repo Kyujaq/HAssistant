@@ -72,6 +72,8 @@ services:
     restart: unless-stopped
     networks:
       - ha_network
+      
+     
 
   # Home Assistant
   homeassistant:
@@ -114,14 +116,16 @@ services:
   redis:
     image: redis:7-alpine
     container_name: hassistant-redis
-    command: redis-server --appendonly yes --requirepass :gp9U0%o5>~Y1~'@Ntz528B(.£L4N,Qq59eE
+    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:-testpass123}"
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-testpass123}
     volumes:
       - redis_data:/data
     ports:
       - "6380:6379"  # Use 6380 to avoid conflict with /assistant redis
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-CHANGE_ME_STRONG_PASSWORD_REQUIRED}", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD:-testpass123}\" ping || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -177,6 +181,7 @@ services:
       environment:
         - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8081
         - LETTA_API_KEY=${LETTA_API_KEY}
+        - REDIS_PASSWORD=${REDIS_PASSWORD:-testpass123}
         - OLLAMA_CHAT_URL=http://ollama-chat:11434
         - OLLAMA_VISION_URL=http://ollama-vision:11434
         - HERMES_MODEL=${HERMES_MODEL:-glados-hermes3}
@@ -313,12 +318,12 @@ services:
         reservations:
           devices:
             - capabilities: [gpu]
-              device_ids: ['0']   # GPU 0 → 1080 Ti
+              device_ids: ['1']   # GPU 1 → GTX 1070 (lighter Hermes-3 model)
     ports:
       - "11434:11434"
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
-      - NVIDIA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=1
       - OLLAMA_KEEP_ALIVE=-1  # Keep models loaded indefinitely
     volumes:
       - ollama_chat_data:/root/.ollama
@@ -342,7 +347,8 @@ services:
       - "11435:11434"
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
-      - NVIDIA_VISIBLE_DEVICES=1
+      - NVIDIA_VISIBLE_DEVICES=0
+      - OLLAMA_KEEP_ALIVE=-1  # Keep Qwen2.5-VL loaded indefinitely
     volumes:
       - ollama_vision_data:/root/.ollama
       - ./ollama/modelfiles:/root/.ollama/modelfiles:ro
@@ -485,7 +491,7 @@ services:
     networks:
       - ha_network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8084/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -493,38 +499,70 @@ services:
   kitchen-api:
     build:
       context: ./services/kitchen-api
+    container_name: hassistant-kitchen-api
+    env_file: .env
+    environment:
+      - DB_PATH=/app/data/kitchen.db
     ports:
       - "8083:8083"
     volumes:
       - ./services/kitchen-api/data:/app/data
     networks:
-      - assistant_default
+      - ha_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
+      
 
-  piper-glados:
-    container_name: hassistant-piper-glados
-    image: rhasspy/wyoming-piper:latest
-    runtime: nvidia
-    command: --voice en_US-glados-medium --uri 'tcp://0.0.0.0:10200' --data-dir /data --piper /usr/share/piper/piper --streaming
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: [gpu]
-              device_ids: ['1']  # GPU 1 → GTX 1070 (share with Whisper)
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=1
+  dozzle:
+    image: ghcr.io/amir20/dozzle:latest
+    container_name: hassistant_dozzle
     volumes:
-      - ./piper_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     ports:
-      - "10200:10200"
+      - "8888:8080"
     restart: unless-stopped
     networks:
       - ha_network
+
+  # Prometheus - Metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: hassistant-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    networks:
+      - ha_network
+
+  # Grafana - Metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hassistant-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - ha_network
+
 
 volumes:
   postgres_data:
@@ -534,6 +572,10 @@ volumes:
   ollama_chat_data:
     driver: local
   ollama_vision_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
     driver: local
   piper_data:
   whisper_data:
@@ -550,3 +592,5 @@ networks:
   ha_network:
     external: true
     name: assistant_default  # Connect to existing HA network
+
+

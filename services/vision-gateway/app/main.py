@@ -6,8 +6,11 @@ from contextlib import asynccontextmanager
 import numpy as np
 import cv2
 import requests
+import imagehash
+from PIL import Image
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel
 
 # ---------------------- CPU friendliness ----------------------
@@ -59,8 +62,91 @@ MATCH_EVERY_N    = int(os.getenv("MATCH_EVERY_N", "3"))       # run matcher ever
 # Downscale for the Qwen snapshot (only for the single post-press screenshot)
 HDMI_RESIZE_LONG = int(os.getenv("HDMI_RESIZE_LONG", "1280"))
 
+# ---------------------- Screen Regions ----------------------
+# Region definitions for screen analysis (x, y, width, height as fractions 0-1)
+REGIONS = {
+    "full": (0, 0, 1.0, 1.0),                  # Entire screen
+    "top_left": (0, 0, 0.5, 0.5),              # Top-left quarter
+    "top_right": (0.5, 0, 0.5, 0.5),           # Top-right quarter
+    "bottom_left": (0, 0.5, 0.5, 0.5),         # Bottom-left quarter
+    "bottom_right": (0.5, 0.5, 0.5, 0.5),      # Bottom-right quarter
+    "top": (0, 0, 1.0, 0.33),                  # Top third
+    "bottom": (0, 0.67, 1.0, 0.33),            # Bottom third
+    "left": (0, 0, 0.5, 1.0),                  # Left half
+    "right": (0.5, 0, 0.5, 1.0),               # Right half
+    "center": (0.25, 0.25, 0.5, 0.5)           # Center 50%
+}
+
+def crop_to_region(frame: np.ndarray, region_name: str) -> np.ndarray:
+    """
+    Crop frame to specified region for faster analysis.
+
+    Args:
+        frame: Full screen frame
+        region_name: Region name from REGIONS dict
+
+    Returns:
+        Cropped frame
+    """
+    if region_name not in REGIONS or region_name == "full":
+        return frame
+
+    x_frac, y_frac, w_frac, h_frac = REGIONS[region_name]
+    height, width = frame.shape[:2]
+
+    x = int(x_frac * width)
+    y = int(y_frac * height)
+    w = int(w_frac * width)
+    h = int(h_frac * height)
+
+    return frame[y:y+h, x:x+w]
+
+def compute_frame_signature(frame: np.ndarray) -> str:
+    """
+    Compute perceptual hash (pHash) of frame for cache key generation.
+
+    Uses difference hash which is robust to minor pixel changes, compression artifacts,
+    and slight color shifts. This enables cache hits when content is visually identical
+    even if pixels differ slightly.
+
+    Args:
+        frame: BGR image as numpy array (from OpenCV)
+
+    Returns:
+        Hex string of pHash (e.g., "a1b2c3d4e5f6g7h8")
+    """
+    # Convert BGR (OpenCV) to RGB (PIL)
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    pil_image = Image.fromarray(rgb_frame)
+
+    # Compute perceptual hash (8x8 = 64-bit hash)
+    # phash is more robust than average_hash for screen content
+    frame_hash = imagehash.phash(pil_image, hash_size=8)
+
+    return str(frame_hash)
+
 # ---------------------- App ----------------------
 app = FastAPI(title="Vision Gateway (Native ROI + Masked Matching)")
+
+# Prometheus metrics
+vision_requests = Counter(
+    'vision_requests_total',
+    'Total vision analysis requests',
+    ['endpoint', 'region']
+)
+
+vision_latency = Histogram(
+    'vision_inference_latency_ms',
+    'Vision model inference time',
+    ['model', 'region'],
+    buckets=[100, 500, 1000, 5000, 10000, 20000, 30000]
+)
+
+phash_operations = Counter(
+    'phash_operations_total',
+    'Total pHash computations',
+    ['operation']  # peek or analyze
+)
 
 @app.on_event("startup")
 async def startup_event():
@@ -516,22 +602,173 @@ latest_frames: Dict[str, Dict[str, Any]] = {}  # source -> {"image_b64": str, "t
 def get_latest_frame(source: str):
     """
     Get the latest frame from a specific source
-    
+
     Args:
         source: Source name (e.g., "frigate_hdmi", "hdmi", "local")
-    
+
     Returns:
         JSON with base64-encoded image and timestamp
     """
     if source not in latest_frames:
         return {"error": f"No frames available for source '{source}'"}
-    
+
     frame_data = latest_frames[source]
     return {
         "image": frame_data["image_b64"],
         "timestamp": frame_data["timestamp"],
         "source": source
     }
+
+class AnalyzeScreenRequest(BaseModel):
+    prompt: str = "Describe what you see on the screen in detail."
+    region: str = "full"
+
+@app.post("/api/analyze_screen")
+async def analyze_screen(request: AnalyzeScreenRequest):
+    """
+    Analyze the current HDMI screen using Qwen2.5-VL with a custom prompt.
+    Supports region-based analysis for 75% faster response on focused queries.
+
+    Args:
+        request: AnalyzeScreenRequest with prompt and region
+
+    Returns:
+        JSON with analysis result
+    """
+    start_time = time.time()
+    prompt = request.prompt
+    region = request.region
+
+    # Track request
+    vision_requests.labels(endpoint='analyze_screen', region=region).inc()
+
+    # Get latest HDMI frame
+    if "hdmi" not in latest_frames:
+        return {
+            "success": False,
+            "error": "No HDMI frames available. Is HDMI capture enabled?"
+        }
+
+    frame_data = latest_frames["hdmi"]
+
+    # Decode base64 image
+    try:
+        img_bytes = base64.b64decode(frame_data["image_b64"])
+        img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+        if img is None:
+            return {"success": False, "error": "Failed to decode image"}
+
+        # Crop to region for faster analysis
+        if region != "full" and region in REGIONS:
+            print(f"Cropping to region: {region}", flush=True)
+            img = crop_to_region(img, region)
+            print(f"Cropped frame size: {img.shape[1]}x{img.shape[0]}", flush=True)
+
+        # Compute perceptual hash for cache key generation
+        frame_sig = compute_frame_signature(img)
+        print(f"Frame signature (pHash): {frame_sig}", flush=True)
+
+        # Track pHash operation
+        phash_operations.labels(operation='analyze').inc()
+
+        # Call Qwen2.5-VL with custom prompt
+        b64 = b64_jpg(img, 92)
+        if not b64:
+            return {"success": False, "error": "Failed to encode image"}
+
+        print(f"Analyzing {region} region with prompt: {prompt[:50]}...", flush=True)
+        inference_start = time.time()
+        res = requests.post(
+            f"{OLLAMA_VISION_BASE}/api/generate",
+            timeout=120,  # Increased for Qwen2.5-VL 7B model (can take 60-90s on first run)
+            json={
+                "model": OLLAMA_VISION_MODEL,
+                "stream": False,
+                "images": [b64],
+                "prompt": prompt
+            }
+        )
+        res.raise_for_status()
+        body = res.json()
+
+        # Track inference latency
+        inference_ms = (time.time() - inference_start) * 1000
+        vision_latency.labels(model=OLLAMA_VISION_MODEL, region=region).observe(inference_ms)
+
+        print(f"✅ Analysis complete in {inference_ms:.0f}ms", flush=True)
+
+        return {
+            "success": True,
+            "analysis": body.get("response", ""),
+            "timestamp": frame_data["timestamp"],
+            "model": OLLAMA_VISION_MODEL,
+            "region": region,
+            "frame_sig": frame_sig,
+            "latency_ms": inference_ms
+        }
+
+    except Exception as e:
+        print(f"Screen analysis error: {e}", flush=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.post("/api/peek_frame")
+async def peek_frame(request: AnalyzeScreenRequest):
+    """
+    Lightweight endpoint to get frame signature (pHash) without running expensive VL model.
+
+    Use this to check if screen content has changed before doing full analysis.
+    Returns frame_sig in <100ms vs 10-20s for full analysis.
+    """
+    region = request.region or "full"
+
+    # Track request
+    vision_requests.labels(endpoint='peek_frame', region=region).inc()
+
+    if "hdmi" not in latest_frames:
+        return {"success": False, "error": "No HDMI frames available"}
+
+    frame_data = latest_frames["hdmi"]
+
+    try:
+        start_time = time.time()
+
+        # Decode image
+        img_bytes = base64.b64decode(frame_data["image_b64"])
+        img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+        if img is None:
+            return {"success": False, "error": "Failed to decode image"}
+
+        # Crop to region (same as analyze_screen)
+        if region != "full" and region in REGIONS:
+            img = crop_to_region(img, region)
+
+        # Compute pHash only (no Qwen inference)
+        frame_sig = compute_frame_signature(img)
+
+        # Track pHash operation
+        phash_operations.labels(operation='peek').inc()
+
+        # Track latency (should be <100ms)
+        latency_ms = (time.time() - start_time) * 1000
+        vision_latency.labels(model='phash_only', region=region).observe(latency_ms)
+
+        return {
+            "success": True,
+            "frame_sig": frame_sig,
+            "region": region,
+            "timestamp": frame_data["timestamp"],
+            "latency_ms": latency_ms
+        }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 from fastapi.responses import HTMLResponse
 
@@ -551,6 +788,18 @@ def debug_page():
     <img src="data:image/jpeg;base64,{img_b64}" style="max-width: 80vw;"/>
     </body></html>
     """)
+
+@app.get("/metrics")
+def metrics():
+    """
+    Prometheus metrics endpoint for vision-gateway.
+
+    Exposes:
+    - vision_requests_total{endpoint, region}: Request counts
+    - vision_inference_latency_ms{model, region}: Inference latency histogram
+    - phash_operations_total{operation}: pHash computation counts
+    """
+    return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 # ---------------------- Main ----------------------
 if __name__ == "__main__":

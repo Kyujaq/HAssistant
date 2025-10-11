@@ -5,3 +5,4 @@ redis
 numpy
 pydantic
 sentence-transformers
+prometheus-client>=0.19.0

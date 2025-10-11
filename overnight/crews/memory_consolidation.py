@@ -9,9 +9,9 @@ import uuid
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 
-from ..schemas import ConsolidationTask, ConsolidatedMemory, MemoryTier
-from ..tools import memory_tools
-from ..guards import GuardRails
+from schemas import ConsolidationTask, ConsolidatedMemory, MemoryTier
+from tools import memory_tools
+from guards import GuardRails
 
 logger = logging.getLogger(__name__)
 

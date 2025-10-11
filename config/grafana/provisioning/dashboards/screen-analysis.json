@@ -1,0 +1,192 @@
+{
+    "title": "HAssistant - Screen Analysis Performance",
+    "timezone": "browser",
+    "refresh": "5s",
+    "time": {
+      "from": "now-15m",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "title": "Cache Hit Rate",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(rate(screen_analysis_requests_total{source=\"cache\"}[5m])) / sum(rate(screen_analysis_requests_total[5m])) * 100",
+            "legendFormat": "Cache Hit %",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 50, "color": "yellow"},
+                {"value": 80, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "Request Rate (req/min)",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 9, "x": 6, "y": 0},
+        "targets": [
+          {
+            "expr": "rate(screen_analysis_requests_total{source=\"fresh\"}[1m]) * 60",
+            "legendFormat": "Fresh Analysis",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(screen_analysis_requests_total{source=\"cache\"}[1m]) * 60",
+            "legendFormat": "Cache Hits",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Requests/min"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "title": "Avg Latency by Source",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 9, "x": 15, "y": 0},
+        "targets": [
+          {
+            "expr": "rate(screen_analysis_latency_ms_sum{source=\"cache\"}[5m]) / rate(screen_analysis_latency_ms_count{source=\"cache\"}[5m])",
+            "legendFormat": "Cache (ms)",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(screen_analysis_latency_ms_sum{source=\"fresh\"}[5m]) / rate(screen_analysis_latency_ms_count{source=\"fresh\"}[5m])",
+            "legendFormat": "Fresh (ms)",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms"
+          }
+        },
+        "options": {
+          "orientation": "horizontal",
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "title": "Latency Distribution (Histogram)",
+        "type": "heatmap",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+        "targets": [
+          {
+            "expr": "rate(screen_analysis_latency_ms_bucket[5m])",
+            "legendFormat": "{{le}}",
+            "format": "heatmap",
+            "refId": "A"
+          }
+        ],
+        "yAxis": {
+          "format": "ms"
+        }
+      },
+      {
+        "title": "Requests by Region",
+        "type": "piechart",
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 6},
+        "targets": [
+          {
+            "expr": "sum by(region) (screen_analysis_requests_total)",
+            "legendFormat": "{{region}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "title": "Cache Hit Types",
+        "type": "piechart",
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 6},
+        "targets": [
+          {
+            "expr": "sum by(match_type) (screen_analysis_cache_hits_total)",
+            "legendFormat": "{{match_type}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "title": "P95 Latency by Region",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(screen_analysis_latency_ms_bucket{source=\"fresh\"}[5m])) by (le, region))",
+            "legendFormat": "{{region}} (fresh)",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(screen_analysis_latency_ms_bucket{source=\"cache\"}[5m])) by (le, region))",
+            "legendFormat": "{{region}} (cache)",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"format": "ms", "label": "P95 Latency"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "title": "Cache Performance Speedup",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 12, "x": 12, "y": 14},
+        "targets": [
+          {
+            "expr": "(rate(screen_analysis_latency_ms_sum{source=\"fresh\"}[5m]) / rate(screen_analysis_latency_ms_count{source=\"fresh\"}[5m])) / (rate(screen_analysis_latency_ms_sum{source=\"cache\"}[5m]) / rate(screen_analysis_latency_ms_count{source=\"cache\"}[5m]))",
+            "legendFormat": "Speedup Factor",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "x",
+            "decimals": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 10, "color": "yellow"},
+                {"value": 50, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "Total Requests (24h)",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 12, "x": 12, "y": 18},
+        "targets": [
+          {
+            "expr": "sum(increase(screen_analysis_requests_total[24h]))",
+            "legendFormat": "Total",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          }
+        }
+      }
+    ],
+    "schemaVersion": 27,
+    "version": 1,
+    "uid": "screen-analysis-perf",
+    "editable": true
+}
+

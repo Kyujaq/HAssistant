@@ -1,0 +1,200 @@
+{
+    "title": "HAssistant - Vision & Memory Performance",
+    "timezone": "browser",
+    "refresh": "5s",
+    "time": {
+      "from": "now-15m",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Vision Gateway - Request Rate",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(vision_requests_total[1m])",
+            "legendFormat": "{{endpoint}} - {{region}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "reqps", "label": "Requests/sec"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Vision Gateway - Inference Latency",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(vision_inference_latency_ms_bucket[5m]))",
+            "legendFormat": "{{model}} - {{region}} (p95)",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(vision_inference_latency_ms_bucket[5m]))",
+            "legendFormat": "{{model}} - {{region}} (p50)",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"format": "ms", "label": "Latency"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Vision Gateway - pHash Operations",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(phash_operations_total[1m])",
+            "legendFormat": "{{operation}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "ops", "label": "Operations/sec"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Memory System - Operation Rate",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(memory_operations_total[1m])",
+            "legendFormat": "{{operation}} - {{tier}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "ops", "label": "Operations/sec"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Memory System - Query Latency",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(memory_operation_latency_ms_bucket[5m]))",
+            "legendFormat": "{{operation}} - {{tier}} (p95)",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(memory_operation_latency_ms_bucket[5m]))",
+            "legendFormat": "{{operation}} - {{tier}} (p50)",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"format": "ms", "label": "Latency"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Database Query Performance",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(db_query_latency_ms_bucket[5m]))",
+            "legendFormat": "{{query_type}} (p95)",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(db_query_latency_ms_bucket[5m]))",
+            "legendFormat": "{{query_type}} (p50)",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"format": "ms", "label": "Latency"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Embedding Operations",
+        "type": "singlestat",
+        "gridPos": {"x": 0, "y": 24, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(rate(embedding_operations_total[5m]))",
+            "refId": "A"
+          }
+        ],
+        "format": "ops",
+        "sparkline": {"show": true}
+      },
+      {
+        "id": 8,
+        "title": "Vision Requests/min",
+        "type": "singlestat",
+        "gridPos": {"x": 6, "y": 24, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(rate(vision_requests_total[5m])) * 60",
+            "refId": "A"
+          }
+        ],
+        "format": "rpm",
+        "sparkline": {"show": true}
+      },
+      {
+        "id": 9,
+        "title": "Memory Operations/min",
+        "type": "singlestat",
+        "gridPos": {"x": 12, "y": 24, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(rate(memory_operations_total[5m])) * 60",
+            "refId": "A"
+          }
+        ],
+        "format": "rpm",
+        "sparkline": {"show": true}
+      },
+      {
+        "id": 10,
+        "title": "Service Uptime",
+        "type": "table",
+        "gridPos": {"x": 18, "y": 24, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "up{job=~\"vision-gateway|letta-bridge\"}",
+            "format": "table",
+            "instant": true,
+            "refId": "A"
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {},
+              "indexByName": {},
+              "renameByName": {
+                "job": "Service",
+                "Value": "Status"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "schemaVersion": 27,
+    "version": 1
+  }
+

@@ -1,0 +1,35 @@
+global:
+  scrape_interval: 15s  # Scrape targets every 15 seconds
+  evaluation_interval: 15s  # Evaluate rules every 15 seconds
+
+# Scrape configurations
+scrape_configs:
+  # GLaDOS Orchestrator metrics
+  - job_name: 'glados-orchestrator'
+    static_configs:
+      - targets: ['hassistant-glados-orchestrator:8082']
+        labels:
+          service: 'orchestrator'
+          instance: 'glados-v2.2'
+    metrics_path: '/metrics'
+    scrape_interval: 10s  # More frequent for screen analysis metrics
+
+  # Vision Gateway - Screen analysis and HDMI capture
+  - job_name: 'vision-gateway'
+    static_configs:
+      - targets: ['vision-gateway:8088']  # Container internal port
+        labels:
+          service: 'vision'
+          instance: 'hdmi-capture'
+    metrics_path: '/metrics'
+    scrape_interval: 10s  # Frequent for screen analysis
+
+  # Letta Bridge - Memory system
+  - job_name: 'letta-bridge'
+    static_configs:
+      - targets: ['hassistant-letta-bridge:8000']  # Container internal port
+        labels:
+          service: 'memory'
+          instance: 'letta-v0.1'
+    metrics_path: '/metrics'
+    scrape_interval: 15s

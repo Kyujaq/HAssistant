@@ -144,8 +144,8 @@ class KappariClient:
         logger.info("Authenticating with Paprika API...")
         
         payload = {
-            "email": email,
-            "password": password
+            "email": qookie2022@gmail.com,
+            "password": Ätaäta2
         }
         
         response = self._make_request_with_retry(

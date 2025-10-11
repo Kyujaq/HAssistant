@@ -1,4 +1,3 @@
-```python
 # overnight/crews/kitchen_crew.py
 """
 Crew for handling kitchen-related tasks such as recipe sync, inventory management,
@@ -140,4 +139,3 @@ class KitchenCrew:
         logger.info("KITCHEN STACK PIPELINE COMPLETED SUCCESSFULLY")
         logger.info("=" * 60)
         return results
-```

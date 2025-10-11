@@ -1,11 +1,6 @@
-```plaintext
 fastapi
 uvicorn
 psycopg2-binary
-pyzbar
-pytesseract
-opencv-python
 pillow
 requests
 apscheduler>=3.10.0
-```
