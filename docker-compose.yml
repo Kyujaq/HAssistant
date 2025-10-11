@@ -468,36 +468,36 @@ services:
   #   networks:
   #     - ha_network
 
-  # Crew Orchestrator - Multi-Agent UI Automation (NEW!)
-  # Uses CrewAI to plan, execute, and verify UI automation tasks
-  # Uncomment to enable crew-based automation
-  # crew-orchestrator:
-  #   build:
-  #     context: ./services/crew-orchestrator
-  #     dockerfile: Dockerfile
-  #   container_name: hassistant-crew-orchestrator
-  #   environment:
-  #     - PORT=8084
-  #     - VISION_GATEWAY_URL=http://vision-gateway:8088
-  #     - WINDOWS_VOICE_CONTROL_URL=http://localhost:8085
-  #     - PYTHONPATH=/shared
-  #   volumes:
-  #     - ./shared:/shared:ro  # Shared modules (voice, vision clients)
-  #     - ./clients:/clients:ro  # Windows voice control script
-  #   ports:
-  #     - "8084:8084"
-  #   depends_on:
-  #     - vision-gateway
-  #     - ollama-chat
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8084/healthz', timeout=5).raise_for_status()"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 15s
-  #   networks:
-  #     - ha_network
+#Crew Orchestrator - Multi-Agent UI Automation (NEW!)
+#   Uses CrewAI to plan, execute, and verify UI automation tasks
+#  Uncomment to enable crew-based automation
+  crew-orchestrator:
+     build:
+       context: ./services/crew-orchestrator
+       dockerfile: Dockerfile
+     container_name: hassistant-crew-orchestrator
+     environment:
+       - PORT=8085
+       - VISION_GATEWAY_URL=http://vision-gateway:8088
+       - WINDOWS_VOICE_CONTROL_URL=http://localhost:8085
+       - PYTHONPATH=/shared
+     volumes:
+       - ./shared:/shared:ro  # Shared modules (voice, vision clients)
+       - ./clients:/clients:ro  # Windows voice control script
+     ports:
+       - "8085:8085"
+     depends_on:
+       - vision-gateway
+       - ollama-chat
+     restart: unless-stopped
+     healthcheck:
+       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8084/healthz', timeout=5).raise_for_status()"]
+       interval: 30s
+       timeout: 10s
+       retries: 3
+       start_period: 15s
+     networks:
+       - ha_network
 
 volumes:
   postgres_data:

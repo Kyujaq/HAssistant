@@ -10,7 +10,7 @@ import sys
 import logging
 from pathlib import Path
 from typing import Type
-from crewai_tools import BaseTool
+from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, validator
 
 # Ensure repository root is available for shared helpers
