@@ -56,14 +56,39 @@ class WindowsVoiceExecutor:
         Returns:
             (success, message) tuple
         """
-        if not self.speak_command:
-            return False, "Windows Voice Control not available"
+        # Use bash wrapper if available (works better in Docker with Wyoming)
+        import subprocess
+        import shlex
 
         try:
-            success = self.speak_command(command)
-            if success:
+            # Try using the send_command.sh wrapper (if running in Docker)
+            result = subprocess.run(
+                ['bash', '/app/send_command.sh', command],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
                 return True, f"✅ Voice command executed: '{command}'"
-            return False, f"❌ Voice command failed: '{command}'"
+            else:
+                error = result.stderr or result.stdout
+                logger.error(f"send_command.sh failed: {error}")
+                return False, f"❌ Voice command failed: {error[:200]}"
+
+        except FileNotFoundError:
+            # Fallback to direct Python call (for host execution)
+            if not self.speak_command:
+                return False, "Windows Voice Control not available"
+
+            try:
+                success = self.speak_command(command)
+                if success:
+                    return True, f"✅ Voice command executed: '{command}'"
+                return False, f"❌ Voice command failed: '{command}'"
+            except Exception as e:
+                logger.error(f"Voice command error: {e}")
+                return False, f"Error executing voice command: {str(e)}"
         except Exception as e:
             logger.error(f"Voice command error: {e}")
             return False, f"Error executing voice command: {str(e)}"

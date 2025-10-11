@@ -73,6 +73,34 @@ services:
     networks:
       - ha_network
 
+  # Windows Voice Control Bridge
+  # Sends commands to Windows laptop via audio cable using Piper TTS
+  windows-voice-control:
+    build:
+      context: .
+      dockerfile: services/windows-voice-control/Dockerfile
+    container_name: hassistant-windows-voice-control
+    environment:
+      - TTS_URL=http://hassistant-piper-glados:10200
+      - PIPER_HOST=hassistant-piper-glados
+      - PIPER_PORT=10200
+      - USB_AUDIO_DEVICE=${USB_AUDIO_DEVICE:-hw:5,0}  # Card 5 = USB Audio Device
+      - USE_PULSEAUDIO=${USE_PULSEAUDIO:-false}
+      - PULSEAUDIO_SINK=${PULSEAUDIO_SINK:-alsa_output.usb-default}
+      - WYOMING_ENABLED=${WYOMING_ENABLED:-false}
+      - USE_DIRECT_PIPER=false  # Don't use direct Piper in Docker, use Wyoming protocol
+    devices:
+      - /dev/snd:/dev/snd  # Pass through audio devices
+    volumes:
+      - ./clients/windows_voice_control.py:/app/windows_voice_control.py:ro
+    restart: unless-stopped
+    networks:
+      - ha_network
+    depends_on:
+      - piper-glados
+    profiles:
+      - windows-control  # Optional service, enable with --profile windows-control
+
   # Home Assistant
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable
@@ -481,6 +509,16 @@ services:
        - VISION_GATEWAY_URL=http://vision-gateway:8088
        - WINDOWS_VOICE_CONTROL_URL=http://localhost:8085
        - PYTHONPATH=/shared
+       - OPENAI_API_BASE=${OPENAI_API_BASE:-http://ollama-chat:11434/v1}
+       - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-local}
+       - OPENAI_MODEL=${OPENAI_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
+       # Windows Voice Control settings
+       - USE_DIRECT_PIPER=false
+       - WYOMING_ENABLED=false
+       - TTS_URL=http://hassistant-piper-glados:5000
+       - PIPER_HOST=hassistant-piper-glados
+       - PIPER_PORT=5000
+       - USB_AUDIO_DEVICE=hw:5,0
      volumes:
        - ./shared:/shared:ro  # Shared modules (voice, vision clients)
        - ./clients:/clients:ro  # Windows voice control script

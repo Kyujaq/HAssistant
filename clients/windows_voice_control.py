@@ -46,7 +46,8 @@ def get_bool_env(key: str, default: str = 'false') -> bool:
     return os.getenv(key, default).lower() == 'true'
 
 # Configuration from environment or defaults
-TTS_URL = os.getenv('TTS_URL', 'http://localhost:10200')
+# Defaults use Docker container names (for running in Docker network)
+TTS_URL = os.getenv('TTS_URL', 'http://hassistant-piper-glados:10200')
 PIPER_HOST = os.getenv('PIPER_HOST', 'hassistant-piper-glados')
 PIPER_PORT = os.getenv('PIPER_PORT', '10200')
 USB_AUDIO_DEVICE = os.getenv('USB_AUDIO_DEVICE', 'hw:1,0')  # ALSA device for USB dongle
