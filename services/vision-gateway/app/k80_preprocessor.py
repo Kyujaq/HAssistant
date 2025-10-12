@@ -140,18 +140,20 @@ class K80Preprocessor:
             return []
 
         try:
-            # Convert BGR (OpenCV) to RGB
+            # Convert BGR (OpenCV) to RGB tensor on the target GPU
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame_tensor = torch.from_numpy(frame_rgb).float()
+            frame_tensor = frame_tensor.permute(2, 0, 1).contiguous() / 255.0
+            frame_tensor = frame_tensor.to(self.device)
 
             # Create text prompt (GroundingDINO uses " . " separator)
             text_prompt = " . ".join(prompts)
 
             # Run detection on K80
-            # GroundingDINO's predict function expects numpy array, not PIL Image
             from groundingdino.util.inference import predict as gdino_predict
             boxes, logits, phrases = gdino_predict(
                 model=self.model,
-                image=frame_rgb,  # Pass numpy array directly
+                image=frame_tensor,
                 caption=text_prompt,
                 box_threshold=self.box_threshold,
                 text_threshold=self.text_threshold,
@@ -162,16 +164,26 @@ class K80Preprocessor:
             h, w = frame.shape[:2]
 
             for box, confidence, label in zip(boxes, logits, phrases):
-                # Convert normalized coords [0,1] to pixel coords
-                x_center, y_center, width, height = box.tolist()
-                x = int((x_center - width / 2) * w)
-                y = int((y_center - height / 2) * h)
-                w_box = int(width * w)
-                h_box = int(height * h)
+                # Convert normalized coords [0,1] (xyxy) to pixel coords
+                x0, y0, x1, y1 = box.tolist()
+
+                # Clamp to valid range to avoid negative values from jitter
+                x0 = min(max(x0, 0.0), 1.0)
+                y0 = min(max(y0, 0.0), 1.0)
+                x1 = min(max(x1, 0.0), 1.0)
+                y1 = min(max(y1, 0.0), 1.0)
+
+                px0 = int(x0 * w)
+                py0 = int(y0 * h)
+                px1 = int(x1 * w)
+                py1 = int(y1 * h)
+
+                w_box = max(1, px1 - px0)
+                h_box = max(1, py1 - py0)
 
                 detections.append(Detection(
                     label=label,
-                    bbox=(x, y, w_box, h_box),
+                    bbox=(px0, py0, w_box, h_box),
                     confidence=float(confidence),
                 ))
 

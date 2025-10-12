@@ -299,6 +299,58 @@ services:
     networks:
       - ha_network
 
+  # ---- Real-World Vision Gateway (K80 GPU 3 for people/face/pose detection) ----
+  realworld-gateway:
+    build:
+      context: ./services/realworld-gateway
+      dockerfile: Dockerfile
+    container_name: realworld-gateway
+    runtime: nvidia
+    privileged: true  # Required for V4L2 device access
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+              device_ids: ['3']   # GPU 3 → Tesla K80 #2 (24GB, for YOLOv8/RetinaFace/MediaPipe)
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=3
+      # HA push
+      - HA_BASE_URL=http://homeassistant:8123
+      - HA_TOKEN=${HA_TOKEN}
+      # VL endpoint (GPU 0 / Ollama-vision)
+      - OLLAMA_VISION_BASE=http://ollama-vision:11434
+      - OLLAMA_VISION_MODEL=qwen2.5vl:7b
+      # CompreFace for face recognition
+      - COMPREFACE_URL=http://compreface-api:8000
+      - COMPREFACE_API_KEY=${COMPREFACE_API_KEY:-}
+      # Frigate integration
+      - FRIGATE_MODE=true  # Consume Frigate snapshots instead of direct webcam
+      - FRIGATE_URL=http://frigate:5000
+      - FRIGATE_CAMERA=webcam
+      - FRIGATE_POLL_INTERVAL=2.0
+      # K80 GPU 3 preprocessing
+      - K80_ENABLED=true  # K80 continuous detection ENABLED!
+      - K80_DEVICE=cuda:3  # GPU 3 (Tesla K80 #2)
+      - K80_SCENE_CHANGE_THRESHOLD=0.3
+      # Webcam capture (disabled - using Frigate)
+      - WEBCAM_ENABLED=false
+      # Detection processing
+      - PROCESS_EVERY_N=3  # Process every 3rd frame
+    volumes:
+      - ./services/realworld-gateway/models:/app/models   # Model weights (persistent)
+    # devices:  # Removed - Frigate accesses webcam, we get snapshots from Frigate
+    #   - /dev/video0:/dev/video0
+    ports:
+      - "8089:8089"  # Debug UI at http://localhost:8089/debug
+    depends_on:
+      - homeassistant
+      - ollama-vision
+      - frigate  # Get snapshots from Frigate
+    restart: unless-stopped
+    networks:
+      - ha_network
+
   # ---- Frigate (webcam motion, snapshots) ----
   frigate:
     image: ghcr.io/blakeblackshear/frigate:stable
@@ -311,10 +363,10 @@ services:
         reservations:
           devices:
             - capabilities: [gpu,video]
-              device_ids: ['1']   # GPU 1 → GTX 1070 (shared with vision tasks)
+              device_ids: ['3']   # GPU 3 → K80 #2 (shared with realworld-gateway)
     environment:
       - FRIGATE_RTSP_PASSWORD=${FRIGATE_RTSP_PASSWORD:-CHANGE_ME_FRIGATE_PASSWORD}
-      - NVIDIA_VISIBLE_DEVICES=1
+      - NVIDIA_VISIBLE_DEVICES=3
     volumes:
       - ./frigate/config:/config
       - /etc/localtime:/etc/localtime:ro

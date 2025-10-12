@@ -1,0 +1,18 @@
+# GLaDOS Vision System Cameras
+# Add these to your Home Assistant configuration.yaml:
+# camera: !include glados_vision_cameras.yaml
+
+camera:
+  # Screen Vision (HDMI Capture - GPU 2 K80 #1)
+  - platform: mjpeg
+    name: "GLaDOS Screen Vision"
+    mjpeg_url: "http://vision-gateway:8088/stream/mjpeg"
+    still_image_url: "http://vision-gateway:8088/stream/latest.jpg"
+    verify_ssl: false
+
+  # Real-World Vision (Webcam - GPU 3 K80 #2)
+  - platform: mjpeg
+    name: "GLaDOS Webcam Vision"
+    mjpeg_url: "http://realworld-gateway:8089/stream/mjpeg"
+    still_image_url: "http://realworld-gateway:8089/stream/latest.jpg"
+    verify_ssl: false

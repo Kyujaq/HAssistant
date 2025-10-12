@@ -1,4 +1,4 @@
-import os, re, time, threading, base64
+import os, re, time, threading, base64, asyncio
 from collections import deque
 from typing import List, Dict, Any, Tuple
 from contextlib import asynccontextmanager
@@ -6,7 +6,8 @@ from contextlib import asynccontextmanager
 import numpy as np
 import cv2
 import requests
-from fastapi import FastAPI, UploadFile, File, Form
+from datetime import datetime
+from fastapi import FastAPI, UploadFile, File, Form, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -106,6 +107,9 @@ ICON_MASK: Dict[str, np.ndarray] = {}
 
 # Variance threshold for detecting a "flat" (blank) screen
 FLAT_VAR = float(os.getenv("FLAT_VAR", "100.0"))
+
+# MJPEG streaming frame
+mjpeg_frame = None
 
 # ---------------------- Image Utils ----------------------
 def _prep_gray(img: np.ndarray) -> np.ndarray:
@@ -340,11 +344,14 @@ def hdmi_loop():
         frame_i += 1
 
         # Store latest frame for API access (Computer Control Agent)
-        global latest_frames
+        global latest_frames, mjpeg_frame
         latest_frames["hdmi"] = {
             "image_b64": b64_jpg(frame),
             "timestamp": time.time()
         }
+
+        # Update MJPEG stream frame
+        mjpeg_frame = frame.copy()
 
         # K80 continuous detection (Phase 2)
         if k80_preprocessor is not None and frame_i % MATCH_EVERY_N == 0:
@@ -601,6 +608,45 @@ def get_latest_frame(source: str):
         "timestamp": frame_data["timestamp"],
         "source": source
     }
+
+@app.get("/stream/mjpeg")
+async def mjpeg_stream():
+    """
+    Live MJPEG stream for Home Assistant
+
+    Returns multipart MJPEG stream that can be consumed by HA's MJPEG camera platform
+    """
+    async def generate():
+        while True:
+            if mjpeg_frame is not None:
+                # Encode frame as JPEG
+                ok, jpeg = cv2.imencode(".jpg", mjpeg_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+                if ok:
+                    frame_bytes = jpeg.tobytes()
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n"
+                    )
+            await asyncio.sleep(0.1)  # ~10 FPS stream
+
+    return Response(
+        generate(),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+@app.get("/stream/latest.jpg")
+async def latest_frame_jpg():
+    """
+    Latest frame as JPEG (for HA generic camera)
+
+    Returns the most recent frame as a static JPEG image
+    """
+    if mjpeg_frame is not None:
+        ok, jpeg = cv2.imencode(".jpg", mjpeg_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+        if ok:
+            return Response(content=jpeg.tobytes(), media_type="image/jpeg")
+
+    return Response(content=b"", status_code=404)
 
 from fastapi.responses import HTMLResponse
 
