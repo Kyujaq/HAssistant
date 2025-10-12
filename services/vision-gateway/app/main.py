@@ -30,6 +30,13 @@ OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", "qwen2.5vl:7b")
 HDMI_ENABLED = os.getenv("HDMI_ENABLED", "false").lower() == "true"
 HDMI_DEVICE  = os.getenv("HDMI_DEVICE", "/dev/video0")
 
+# K80 GPU preprocessing (Phase 2)
+K80_ENABLED = os.getenv("K80_ENABLED", "false").lower() == "true"
+K80_DEVICE = os.getenv("K80_DEVICE", "cuda:2")
+K80_BOX_THRESHOLD = float(os.getenv("K80_BOX_THRESHOLD", "0.35"))
+K80_TEXT_THRESHOLD = float(os.getenv("K80_TEXT_THRESHOLD", "0.25"))
+K80_SCENE_CHANGE_THRESHOLD = float(os.getenv("K80_SCENE_CHANGE_THRESHOLD", "0.3"))
+
 # Native capture size (what your dongle actually supports)
 CAP_WIDTH   = int(os.getenv("HDMI_WIDTH", "1920"))
 CAP_HEIGHT  = int(os.getenv("HDMI_HEIGHT", "1080"))
@@ -273,6 +280,26 @@ def hdmi_loop():
     press_t  = ICON_GRAY.get("send_pressed")
     press_m  = ICON_MASK.get("send_pressed")
 
+    # Initialize K80 preprocessor if enabled
+    k80_preprocessor = None
+    k80_scene_tracker = None
+    k80_enabled = K80_ENABLED  # Local copy to avoid scope issues
+    if k80_enabled:
+        try:
+            from app.k80_preprocessor import K80Preprocessor, SceneTracker
+            print(f"[hdmi] Initializing K80 preprocessor on {K80_DEVICE}...", flush=True)
+            k80_preprocessor = K80Preprocessor(
+                device=K80_DEVICE,
+                box_threshold=K80_BOX_THRESHOLD,
+                text_threshold=K80_TEXT_THRESHOLD,
+            )
+            k80_scene_tracker = SceneTracker(change_threshold=K80_SCENE_CHANGE_THRESHOLD)
+            print("[hdmi] K80 preprocessor initialized successfully!", flush=True)
+        except Exception as e:
+            print(f"[hdmi] WARNING: K80 preprocessor failed to initialize: {e}", flush=True)
+            print("[hdmi] Falling back to template matching only", flush=True)
+            k80_enabled = False
+
     delay = 1.0 / max(0.1, CAP_FPS_REQ)
     state = "SCANNING"
 
@@ -318,6 +345,48 @@ def hdmi_loop():
             "image_b64": b64_jpg(frame),
             "timestamp": time.time()
         }
+
+        # K80 continuous detection (Phase 2)
+        if k80_preprocessor is not None and frame_i % MATCH_EVERY_N == 0:
+            try:
+                detections = k80_preprocessor.detect_elements(
+                    frame,
+                    prompts=["button", "send button", "accept button", "join button", "dialog box"]
+                )
+                detection_summary = k80_preprocessor.get_detection_summary(detections)
+
+                # Check for scene changes
+                if k80_scene_tracker.has_changed(detection_summary, k80_preprocessor):
+                    # Scene changed - call Qwen for deep analysis
+                    print(f"[k80] Scene change detected, triggering Qwen analysis...", flush=True)
+                    shot_ds = downscale_keep_long(frame, HDMI_RESIZE_LONG)
+
+                    def _k80_qwen_analysis(img, dets):
+                        try:
+                            vl = call_qwen_vl(img)
+                            ha_event("vision.k80_scene_change", {
+                                "source": "hdmi_k80",
+                                "detections": [{"label": d.label, "bbox": d.bbox, "confidence": d.confidence} for d in dets],
+                                "vl": vl,
+                                "ts": time.time()
+                            })
+                            recent_detections.insert(0, {
+                                "timestamp": time.time(),
+                                "result": {
+                                    "k80_detections": [{"label": d.label, "bbox": d.bbox, "confidence": d.confidence} for d in dets],
+                                    "vl": vl,
+                                    "detection_mode": "k80_groundingdino"
+                                },
+                                "frame_b64": b64_jpg(img, 85),
+                            })
+                            del recent_detections[10:]
+                        except Exception as e:
+                            print(f"[k80] Qwen analysis error: {e}", flush=True)
+
+                    threading.Thread(target=_k80_qwen_analysis, args=(shot_ds, detections), daemon=True).start()
+
+            except Exception as e:
+                print(f"[k80] Detection error: {e}", flush=True)
 
         # --- Native ROI (pad generously to absorb small drift) ---
         x0, y0, w0, h0 = bx, by, bw, bh

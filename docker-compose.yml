@@ -228,20 +228,34 @@ services:
       networks:
         - ha_network
 
-  # ---- Vision Gateway (CPU heavy, light GPU use unless you enable GPU OCR) ----
+  # ---- Vision Gateway (K80 GPU for continuous object detection) ----
   vision-gateway:
     build:
       context: ./services/vision-gateway
       dockerfile: Dockerfile
     container_name: vision-gateway
+    runtime: nvidia
     privileged: true  # Required for V4L2 device access
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+              device_ids: ['2']   # GPU 2 → Tesla K80 (24GB, for GroundingDINO)
     environment:
+      - NVIDIA_VISIBLE_DEVICES=2
       # HA push
       - HA_BASE_URL=http://homeassistant:8123
       - HA_TOKEN=${HA_TOKEN}
       # VL endpoint (1070 / Ollama-vision)
       - OLLAMA_VISION_BASE=http://ollama-vision:11434
       - OLLAMA_VISION_MODEL=qwen2.5vl:7b
+      # K80 GPU preprocessing
+      - K80_ENABLED=true  # K80 continuous detection ENABLED!
+      - K80_DEVICE=cuda:2
+      - K80_BOX_THRESHOLD=0.35
+      - K80_TEXT_THRESHOLD=0.25
+      - K80_SCENE_CHANGE_THRESHOLD=0.3
       # Direct HDMI capture from UGREEN dongle
       - HDMI_ENABLED=true
       - HDMI_DEVICE=/dev/video2
@@ -272,8 +286,9 @@ services:
       - HDMI_RESIZE_LONG=1280
 
     volumes:
-      - ./vision-gateway/cache:/app/cache
-      - ./vision-gateway/app/assets:/app/assets:ro   # <-- host ./assets → container /app/assets, read-only
+      - ./services/vision-gateway/cache:/app/cache
+      - ./services/vision-gateway/app/assets:/app/assets:ro   # <-- host ./assets → container /app/assets, read-only
+      - ./services/vision-gateway/models:/app/models   # <-- K80 model weights (persistent)
     devices:
       - /dev/video2:/dev/video2  # UGREEN HDMI capture dongle
     ports:

@@ -52,7 +52,15 @@ Wake Word → Home Assistant Assist → Ollama (direct) → GLaDOS Orchestrator 
 - `piper-glados`: TTS
 - `frigate`: Motion detection
 
-**Rationale**: Hermes-3 stays on the lighter GPU to give room for heavy Qwen models on the 1080 Ti.
+**GPU 2 (Tesla K80 - 24GB)**: ✨ NEW!
+- `vision-gateway`: GroundingDINO continuous object detection
+- Runs at 5-10 FPS detecting buttons, dialogs, windows
+- Smart scene change detection (triggers Qwen only when needed)
+
+**GPU 3 (Tesla K80 - 24GB)**:
+- Reserved for future use
+
+**Rationale**: K80 provides 24GB VRAM for continuous UI element detection, reducing heavy Qwen VL calls by ~10x. Driver downgraded to 470/480 for K80 compatibility.
 
 ## Key Architectural Patterns
 
@@ -242,6 +250,21 @@ Copy from `config/.env.example` and set:
 - `Modelfile.qwen`: Configuration for Qwen 2.5
 
 ## Recent Major Changes
+
+### K80 Vision Integration (Phase 1 & 2)
+**Date**: 2025-10-12 (see `K80_QUICK_START.md` and `docs/implementation/K80_INTEGRATION_COMPLETE.md`)
+
+**Changes**:
+- Integrated Tesla K80 GPU (GPU 2) for continuous object detection
+- Created `app/k80_preprocessor.py` with GroundingDINO support
+- Updated vision-gateway Dockerfile with PyTorch 2.1 + CUDA 11.8
+- Added smart scene tracking to reduce Qwen VL calls by ~10x
+- System now supports 4 GPUs (dual K80 card appears as GPU 2 and GPU 3)
+- Driver downgraded to 470/480 for K80 compatibility
+
+**Status**: Ready for model download - K80 preprocessing disabled by default until GroundingDINO weights are downloaded
+
+**Quick Start**: Run `./services/vision-gateway/download_models.sh` then set `K80_ENABLED=true` in docker-compose.yml
 
 ### Orchestrator Refactor (v2.0)
 **Date**: Recent (see `ORCHESTRATOR_REFACTOR_SUMMARY.md`)

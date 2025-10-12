@@ -106,3 +106,4 @@ ha_config/.storage/
 ha_config/.cloud/
 ha_config/deps/
 ha_config/tts/
+services/vision-gateway/models/
