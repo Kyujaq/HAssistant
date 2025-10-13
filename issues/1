@@ -1,0 +1,11 @@
+**Goal**: Replace `fake_embed()` with a real embedding model and backfill.
+
+**Tasks**
+- [ ] Choose embeddings (SentenceTransformers CPU **or** Ollama embeddings GPU1)
+- [ ] Implement in `letta-bridge` (create + search)
+- [ ] Migration script to re-embed existing memories
+- [ ] Update tests, add benchmarks (latency/quality)
+
+**Acceptance**
+- [ ] `/memory/search` returns relevant results on seed dataset
+- [ ] Backfill completes; no API downtime
