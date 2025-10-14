@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.9-distutils \
     ffmpeg \
     libsndfile1 \
+    libespeak-ng1 \
     curl \
     tini \
     && rm -rf /var/lib/apt/lists/*

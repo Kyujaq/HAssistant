@@ -212,16 +212,20 @@ If shows `"device": "cpu"`, GPU isn't working - check driver/CUDA setup.
 
 ### TTS is garbled/wrong
 
-**Current TTS is stub** (sine wave tones). To use real TTS:
-
-**Option A:** Toggle fallback switch
+**Check Piper voice files**
 ```
-Dashboard → switch.speaches_use_fallback_tts → ON
+docker exec -it hassistant_v2_speaches ls /app/voices
 ```
-This routes TTS to wyoming-piper (port 10200) for real speech.
+Ensure the desired `*.onnx` + `.onnx.json` voice pair exists (default: `en_US-lessac-medium`).
 
-**Option B:** Integrate real Piper in speaches
-(Future enhancement - see v2/services/speaches/server.py line 120)
+**Force container reload after updating voices**
+```
+docker compose -f v2/docker-compose.yml restart speaches
+```
+
+**Adjust speaking cadence (optional)**
+- Set `PIPER_LENGTH_SCALE` env var (e.g. `0.9` faster, `1.1` slower)
+- Restart `speaches` afterwards
 
 ---
 
@@ -244,6 +248,6 @@ After completing these steps, verify:
 Once green-light checklist is complete:
 
 1. **Memory Integration** (Step 2): Letta-bridge + pgvector
-2. **Real TTS**: Replace speaches stub with Piper integration
+2. **TTS Enhancements**: Expand Piper voice options and tuning
 3. **Orchestrator v2**: Tool provider with memory/HA skills
 4. **Production Hardening**: Monitoring, logging, error handling

@@ -14,7 +14,7 @@ HAssistant v2 streaming speech stack is operational with GPU-accelerated STT, Wy
 | Service | Status | Port | GPU | Purpose |
 |---------|--------|------|-----|---------|
 | `ollama-chat` | ✅ Running | 11434 | GPU1* | Hermes3 + Qwen3:4b models |
-| `speaches` | ✅ Healthy | 8000 | GPU1 (1080 Ti) | GPU STT (faster-whisper) + stub TTS |
+| `speaches` | ✅ Healthy | 8000 | GPU1 (1080 Ti) | GPU STT (faster-whisper) + Piper TTS |
 | `wyoming_openai` | ✅ Healthy | 10300, 10210, 8080 | - | Wyoming→OpenAI protocol bridge |
 | `wyoming-piper` | ✅ Healthy | 10200 | - | Fallback TTS (CPU, reliable) |
 
@@ -81,10 +81,10 @@ hermes3:latest    4f6b83f30b62    4.7 GB    Loaded
 
 ### Current Limitations
 
-1. **TTS is Placeholder**
-   - Speaches TTS returns sine wave test tones (not real speech)
-   - Production path: Route to `wyoming-piper` (port 10200) for real TTS
-   - A/B testing available: Proxy can toggle between speaches/piper
+1. **Piper Voice Management**
+   - Speaches now streams Piper audio; ensure desired `.onnx` voices live in `piper_voices`
+   - Add additional voices as needed and restart the container to pick them up
+   - Tune speaking rate with `PIPER_LENGTH_SCALE` if the default cadence feels off
 
 2. **Ollama Healthcheck Issue**
    - Docker healthcheck reports "unhealthy" despite API working
@@ -153,7 +153,7 @@ v2/
 │   ├── smoke_proxy_routes.sh   # ✅ Passed
 │   └── latency_streaming.md    # Manual test instructions
 ├── services/
-│   ├── speaches/               # GPU STT + stub TTS
+│   ├── speaches/               # GPU STT + Piper TTS
 │   │   ├── Dockerfile          # CUDA 11.4 + ffmpeg + onnxruntime
 │   │   ├── requirements.txt    # faster-whisper, fastapi, prometheus
 │   │   └── server.py           # OpenAI-compatible endpoints
@@ -172,7 +172,7 @@ v2/
 |---|-------------|--------|---------|
 | 1 | `docker compose up -d` speaches healthy | ✅ PASS | All services running, speaches reports healthy |
 | 2 | `nvidia-smi` shows GPU-1 load on STT | ✅ PASS | GTX 1080 Ti (GPU1) shows 232 MiB python3.9 |
-| 3 | `smoke_tts_stream.sh` passes (L16 header) | ✅ PASS | Returns `audio/L16; rate=22050; channels=1` |
+| 3 | `smoke_tts_stream.sh` passes (L16 header) | ✅ PASS | Returns `audio/L16; rate=22050; channels=1`, `X-TTS-Status: piper` |
 | 4 | HA shows monitoring (4 entities) | ⚠️  PENDING | Package created, needs HA restart |
 | 5 | Long paragraph < 500ms first-chunk | ⚠️  PENDING | Requires HA Wyoming integration |
 
@@ -200,10 +200,10 @@ Based on `v2/docs/intent_roadmap.md`:
    - Real embeddings (replace fake_embed)
    - Semantic search with pgvector
 
-2. **Real TTS**
-   - Replace speaches stub TTS with Piper
-   - Or route directly to wyoming-piper fallback
-   - Maintain L16 streaming
+2. **TTS Enhancements**
+   - Add additional Piper voices and speaker configs
+   - Evaluate vocoder parameters for latency/quality balance
+   - Maintain L16 streaming contract
 
 3. **Orchestrator v2**
    - Tool provider pattern

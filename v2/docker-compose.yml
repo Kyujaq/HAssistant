@@ -37,7 +37,7 @@ services:
       default:
         aliases: ["ollama-chat"]
 
-  # Speaches - OpenAI-compatible STT (faster-whisper CUDA) + TTS (Piper stub)
+  # Speaches - OpenAI-compatible STT (faster-whisper CUDA) + Piper TTS
   speaches:
     build:
       context: ./services/speaches

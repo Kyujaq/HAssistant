@@ -10,19 +10,23 @@ response=$(curl -sS -X POST http://localhost:8000/v1/audio/speech \
   --output /tmp/speech_test.pcm -D -)
 
 # Check for L16 content type
-if echo "$response" | grep -qi 'Content-Type: audio/L16'; then
-    echo "✅ TTS streaming OK (L16 PCM format)"
-    echo "   Output saved to: /tmp/speech_test.pcm"
-
-    # Show headers
-    echo ""
-    echo "Response headers:"
-    echo "$response" | grep -iE "(Content-Type|X-Sample-Rate|X-TTS-Status)" || true
-
-    exit 0
-else
+if ! echo "$response" | grep -qi 'Content-Type: audio/L16'; then
     echo "❌ TTS streaming failed - wrong content type"
     echo "Headers received:"
     echo "$response"
     exit 1
 fi
+
+if ! echo "$response" | grep -qi 'X-TTS-Status: piper'; then
+    echo "❌ TTS streaming failed - Piper not in use"
+    echo "Headers received:"
+    echo "$response"
+    exit 1
+fi
+
+echo "✅ TTS streaming OK (Piper, L16 PCM format)"
+echo "   Output saved to: /tmp/speech_test.pcm"
+
+echo ""
+echo "Response headers:"
+echo "$response" | grep -iE "(Content-Type|X-Sample-Rate|X-TTS-Status)" || true

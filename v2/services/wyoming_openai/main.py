@@ -79,18 +79,36 @@ async def wyoming_tts(
         payload["format"] = format_hint
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0)) as client:
-            response = await client.post(TTS_URL, json=payload)
-            response.raise_for_status()
+        client = httpx.AsyncClient(timeout=httpx.Timeout(90.0))
+    except Exception as exc:  # pragma: no cover
+        raise HTTPException(status_code=500, detail=f"HTTP client init failed: {exc}") from exc
+
+    async def close_client() -> None:
+        await client.aclose()
+
+    try:
+        stream = client.stream("POST", TTS_URL, json=payload)
+        response = await stream.__aenter__()
+        response.raise_for_status()
     except httpx.HTTPError as exc:
-        raise HTTPException(
-            status_code=502, detail=f"TTS backend error: {exc}"
-        ) from exc
+        await close_client()
+        raise HTTPException(status_code=502, detail=f"TTS backend error: {exc}") from exc
 
     media_type = response.headers.get("content-type", "audio/mpeg")
+    passthrough_headers = {
+        "X-Source": "primary-tts",
+    }
+    for header in ("X-Sample-Rate", "X-Channels", "X-TTS-Status"):
+        if header in response.headers:
+            passthrough_headers[header] = response.headers[header]
 
-    return StreamingResponse(
-        iter([response.content]),
-        media_type=media_type,
-        headers={"X-Source": "primary-tts"},
-    )
+    async def audio_iter():
+        try:
+            async for chunk in response.aiter_bytes():
+                if chunk:
+                    yield chunk
+        finally:
+            await stream.__aexit__(None, None, None)
+            await close_client()
+
+    return StreamingResponse(audio_iter(), media_type=media_type, headers=passthrough_headers)
