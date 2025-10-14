@@ -1,0 +1,204 @@
+# HAssistant v2 - Streaming Speech Stack
+# Port Allocation:
+#   - 11434: ollama-chat (Hermes3 + Qwen3-4B)
+#   - 10300: wyoming_openai STT (Wyoming facade)
+#   - 10210: wyoming_openai TTS (proxy to speaches; avoids conflict with native piper)
+#   - 10200: wyoming-piper (native fallback TTS for A/B testing)
+#   - 8000:  speaches (OpenAI-compatible STT/TTS backend)
+#   - 8080:  wyoming_openai HTTP healthcheck/config API
+#
+# IMPORTANT: Verify GPU indices with `nvidia-smi --query-gpu=index,name --format=csv`
+#            Update NVIDIA_VISIBLE_DEVICES if your GPU1 has a different index
+
+name: hassistant_v2
+
+services:
+  # Ollama chat service - hosts Hermes3 (persona) and Qwen3-4B (reasoning)
+  ollama-chat:
+    image: ollama/ollama:latest
+    container_name: hassistant_v2_ollama_chat
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=1  # Pin to GPU1 (GTX 1070)
+      - OLLAMA_KEEP_ALIVE=3h      # Keep models loaded for faster response
+      - OLLAMA_HOST=0.0.0.0:11434
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL","curl -fsS --max-time 2 http://127.0.0.1:11434/api/version >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 90s   
+    restart: on-failure:3
+    networks:
+      default:
+        aliases: ["ollama-chat"]
+
+  # Speaches - OpenAI-compatible STT (faster-whisper CUDA) + TTS (Piper stub)
+  speaches:
+    build:
+      context: ./services/speaches
+    container_name: hassistant_v2_speaches
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=1         # Pin to GPU1 (GTX 1070) - driver 535 supports CUDA 12.1
+      - USE_CUDA=1                       # Enable CUDA for faster-whisper (3x faster STT)
+      - WHISPER_MODEL=base.en            # base.en (fast) or small.en (better)
+      - PIPER_VOICE=en_US-lessac-medium  # GLaDOS-style voice
+      - SAMPLE_RATE=22050                # Piper output sample rate
+    ports:
+      - "8000:8000"
+    volumes:
+      - piper_voices:/app/voices        # Pre-downloaded voice models
+      - speaches_cache:/root/.cache     # Whisper & Piper model cache
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s  # Longer start period for model loading
+    restart: on-failure:3
+    networks:
+      default:
+        aliases: ["speaches"]
+
+  # Wyoming OpenAI proxy - bridges Wyoming protocol to Speaches OpenAI endpoints
+  wyoming_openai:
+    build:
+      context: ./services/wyoming_openai
+    container_name: hassistant_v2_wyoming_proxy
+    environment:
+      - ASR_URL=http://speaches:8000/v1/audio/transcriptions
+      - TTS_URL=http://speaches:8000/v1/audio/speech
+      - FALLBACK_TTS_HOST=wyoming-piper
+      - FALLBACK_TTS_PORT=10200
+    ports:
+      - "10300:10300"  # STT endpoint (Wyoming TCP)
+      - "10210:10210"  # TTS endpoint (Wyoming TCP)
+      - "8080:8080"    # HTTP healthcheck/config API
+    depends_on:
+      speaches:
+        condition: service_healthy
+      wyoming-piper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: on-failure:3
+    networks:
+      default:
+        aliases: ["wyoming-openai", "wyoming_openai"]
+
+  # Wyoming Piper - native TTS fallback for A/B testing (CPU for reliability)
+  wyoming-piper:
+    image: rhasspy/wyoming-piper:latest
+    container_name: hassistant_v2_piper_fallback
+    command: --voice en_US-lessac-medium --data-dir /data --download-dir /data
+    # No GPU - CPU fallback is more reliable for Piper ONNX
+    ports:
+      - "10200:10200"
+    volumes:
+      - piper_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/10200' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: on-failure:3
+    networks:
+      default:
+        aliases: ["wyoming-piper"]
+
+  postgres:
+    image: postgres:16
+    container_name: hassistant_v2_pg
+    environment:
+      POSTGRES_DB: glados
+      POSTGRES_USER: glados
+      POSTGRES_PASSWORD: glados
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/00_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U glados -d glados"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: on-failure:3
+
+  memory-embed:
+    build: { context: ./services/memory-embed }
+    container_name: hassistant_v2_memembed
+    environment:
+      - DATABASE_URL=postgresql://glados:glados@postgres:5432/glados
+      - EMBED_MODEL=sentence-transformers/all-MiniLM-L6-v2
+      - TOP_K=8
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports:
+      - "8001:8001"
+    volumes:
+      - memembed_cache:/root/.cache
+    healthcheck:
+      test: ["CMD","curl","-fsS","http://localhost:8001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    restart: on-failure:3
+
+  letta-bridge:
+    build: { context: ./services/letta-bridge }
+    container_name: hassistant_v2_lettabridge
+    environment:
+      - MEMORY_URL=http://memory-embed:8001
+      - DATABASE_URL=postgresql://glados:glados@postgres:5432/glados
+    depends_on:
+      memory-embed: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    ports:
+      - "8010:8010"
+    restart: on-failure:3
+
+  memory-backfill:
+    build:
+      context: .
+      dockerfile: services/memory-backfill/Dockerfile
+    container_name: hassistant_v2_memory_backfill
+    working_dir: /app
+    environment:
+      - DATABASE_URL=postgresql://glados:glados@postgres:5432/glados
+      - MEMORY_URL=http://memory-embed:8001
+    volumes:
+      - ./scripts:/app/scripts
+      - ./state:/app/state
+      - ./v1:/app/v1:ro
+    command: ["--resume", "state/backfill.json"]
+    depends_on:
+      memory-embed: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+volumes:
+  ollama_data:
+    name: hassistant_v2_ollama_data
+  piper_voices:
+    name: hassistant_v2_piper_voices
+  piper_data:
+    name: hassistant_v2_piper_data
+  speaches_cache:
+    name: hassistant_v2_speaches_cache  # Critical: caches Whisper & Piper models
+  pgdata:
+    name: hassistant_v2_pgdata
+  memembed_cache:
+    name: hassistant_v2_memembed_cache  # Cache for embedding model
+
+networks:
+  default:
+    name: hassistant_v2_default

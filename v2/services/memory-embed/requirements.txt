@@ -1,0 +1,6 @@
+fastapi>=0.110
+uvicorn[standard]>=0.24
+psycopg[binary,pool]>=3.2
+sentence-transformers>=2.7
+prometheus-client>=0.20
+pydantic>=2.7
