@@ -19,7 +19,7 @@ services:
     container_name: hassistant_v2_ollama_chat
     runtime: nvidia
     environment:
-      - NVIDIA_VISIBLE_DEVICES=1  # Pin to GPU1 (GTX 1070)
+      - NVIDIA_VISIBLE_DEVICES=${CHAT_GPU_INDEX:-1}  # Pin to GPU1 (GTX 1070)
       - OLLAMA_KEEP_ALIVE=3h      # Keep models loaded for faster response
       - OLLAMA_HOST=0.0.0.0:11434
     ports:
@@ -44,11 +44,12 @@ services:
     container_name: hassistant_v2_speaches
     runtime: nvidia
     environment:
-      - NVIDIA_VISIBLE_DEVICES=1         # Pin to GPU1 (GTX 1070) - driver 535 supports CUDA 12.1
-      - USE_CUDA=1                       # Enable CUDA for faster-whisper (3x faster STT)
-      - WHISPER_MODEL=base.en            # base.en (fast) or small.en (better)
-      - PIPER_VOICE=en_US-lessac-medium  # GLaDOS-style voice
-      - SAMPLE_RATE=22050                # Piper output sample rate
+      - NVIDIA_VISIBLE_DEVICES=${SPEECH_GPU_INDEX:-1}        # Pin to GPU1 (GTX 1070) - driver 535 supports CUDA 12.1
+      - USE_CUDA=${USE_CUDA:-1}                              # Enable CUDA for faster-whisper (3x faster STT)
+      - WHISPER_MODEL=${WHISPER_MODEL:-base.en}             # base.en (fast) or small.en (better)
+      - PIPER_VOICE=${PIPER_VOICE:-en_US-lessac-medium}     # GLaDOS-style voice
+      - SAMPLE_RATE=${SAMPLE_RATE:-22050}                   # Piper output sample rate
+      - PIPER_LENGTH_SCALE=${PIPER_LENGTH_SCALE:-}          # Optional cadence tuning
     ports:
       - "8000:8000"
     volumes:
@@ -75,6 +76,7 @@ services:
       - TTS_URL=http://speaches:8000/v1/audio/speech
       - FALLBACK_TTS_HOST=wyoming-piper
       - FALLBACK_TTS_PORT=10200
+      - FALLBACK_TTS_URL=${FALLBACK_TTS_URL:-}
     ports:
       - "10300:10300"  # STT endpoint (Wyoming TCP)
       - "10210:10210"  # TTS endpoint (Wyoming TCP)
@@ -179,6 +181,7 @@ services:
       - ./scripts:/app/scripts
       - ./state:/app/state
       - ./v1:/app/v1:ro
+      - ./sample_data:/app/sample_data:ro
     command: ["--resume", "state/backfill.json"]
     depends_on:
       memory-embed: { condition: service_healthy }
@@ -198,6 +201,19 @@ volumes:
     name: hassistant_v2_pgdata
   memembed_cache:
     name: hassistant_v2_memembed_cache  # Cache for embedding model
+
+# ---- Step 3 (Deferred): Vision/K80 VM integration ---------------------------
+# profiles:
+#   - vision
+#
+# services:
+#   vision-client:
+#     # Client shim that talks to the K80 VM gateway (not local GPU)
+#     image: ghcr.io/hassistant/vision-client:dev
+#     environment:
+#       - VISION_VM_URL=${VISION_VM_URL:-http://k80-vm:9000}
+#     restart: on-failure:3
+#     profiles: ["vision"]
 
 networks:
   default:

@@ -1,0 +1,73 @@
+homeassistant: {}
+
+sensor:
+  - platform: rest
+    name: Speaches Health
+    resource: http://speaches:8000/health
+    value_template: "{{ value_json.ok }}"
+    json_attributes:
+      - device
+      - whisper_model
+      - piper_voice
+      - tts_voice
+      - sample_rate
+      - tts_status
+    scan_interval: 30
+
+  - platform: rest
+    name: Speaches STT Latency
+    resource: http://speaches:8000/metrics
+    value_template: >
+      {% set sum = 0.0 %}{% set cnt = 0.0 %}
+      {% for line in value.split('\n') %}
+        {% if line.startswith('speaches_latency_seconds_sum{route="stt"}') %}
+          {% set sum = line.split(' ')[1] | float %}
+        {% elif line.startswith('speaches_latency_seconds_count{route="stt"}') %}
+          {% set cnt = line.split(' ')[1] | float %}
+        {% endif %}
+      {% endfor %}
+      {{ (sum / (cnt if cnt > 0 else 1)) | round(3) }}
+    unit_of_measurement: s
+    scan_interval: 30
+
+  - platform: rest
+    name: Speaches TTS Latency
+    resource: http://speaches:8000/metrics
+    value_template: >
+      {% set sum = 0.0 %}{% set cnt = 0.0 %}
+      {% for line in value.split('\n') %}
+        {% if line.startswith('speaches_latency_seconds_sum{route="tts"}') %}
+          {% set sum = line.split(' ')[1] | float %}
+        {% elif line.startswith('speaches_latency_seconds_count{route="tts"}') %}
+          {% set cnt = line.split(' ')[1] | float %}
+        {% endif %}
+      {% endfor %}
+      {{ (sum / (cnt if cnt > 0 else 1)) | round(3) }}
+    unit_of_measurement: s
+    scan_interval: 30
+
+switch:
+  - platform: rest
+    name: TTS Fallback (Wyoming Piper)
+    resource: http://wyoming-openai:8080/config
+    body_on: '{"tts_fallback": true}'
+    body_off: '{"tts_fallback": false}'
+    is_on_template: "{{ value_json.tts_fallback | default(false) }}"
+    headers:
+      Content-Type: application/json
+
+binary_sensor:
+  - platform: rest
+    name: Wyoming Proxy Health
+    resource: http://wyoming-openai:8080/healthz
+    value_template: "{{ value_json.ok }}"
+    scan_interval: 30
+
+lovelace:
+  dashboards:
+    speech:
+      mode: yaml
+      filename: speech-view.yaml
+      title: Speech
+      icon: mdi:account-voice
+      show_in_sidebar: true

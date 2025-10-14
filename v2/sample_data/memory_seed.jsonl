@@ -1,0 +1,5 @@
+{"text":"HDMI dongle is in the left desk drawer.","kind":"note","source":"seed"}
+{"text":"Spare AA batteries are in the kitchen cabinet above the microwave.","kind":"note","source":"seed"}
+{"text":"VPN is Proton; Tailscale MagicDNS enabled for glad0s and qutiepi.","kind":"note","source":"seed"}
+{"text":"1080 Ti runs VL; 1070 does chat/speech; K80 handles vision pre/post.","kind":"note","source":"seed"}
+{"text":"Home Assistant uses Wyoming proxy for STT/TTS bridging.","kind":"note","source":"seed"}

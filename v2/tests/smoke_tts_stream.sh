@@ -4,7 +4,8 @@ set -euo pipefail
 echo "🧪 Testing TTS streaming (L16 PCM)..."
 
 # Test TTS endpoint and capture headers
-response=$(curl -sS -X POST http://localhost:8000/v1/audio/speech \
+SPEACHES_BASE="${SPEACHES_BASE:-http://localhost:8000}"
+response=$(curl -sS -X POST "${SPEACHES_BASE}/v1/audio/speech" \
   -H 'Content-Type: application/json' \
   -d '{"input":"GLaDOS online. System check nominal."}' \
   --output /tmp/speech_test.pcm -D -)

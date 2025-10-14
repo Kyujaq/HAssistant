@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-curl -fsS http://192.168.2.13:8000/health | jq .ok >/dev/null && echo "speaches up ✅"
-curl -fsS http://192.168.2.13:10210/healthz | jq .ok >/dev/null && echo "proxy up ✅" || echo "HTTP façade only; proceed"
+
+SPEACHES_BASE="${SPEACHES_BASE:-http://localhost:8000}"
+WYOMING_BASE="${WYOMING_BASE:-http://localhost:8080}"
+
+curl -fsS "${SPEACHES_BASE}/health" | jq .ok >/dev/null && echo "speaches up ✅"
+curl -fsS "${WYOMING_BASE}/healthz" | jq .ok >/dev/null && echo "proxy up ✅"

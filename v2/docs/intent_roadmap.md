@@ -60,6 +60,10 @@ Everything should be surfaced and controllable through **Home Assistant** in add
 
 ## 3) Vision Pipeline (Event-Driven)
 
+> **Status update (Oct 2025):** The K80 vision stack now runs on the dedicated VM.
+> Local `v2/docker-compose.yml` keeps a commented profile stub; enable it only when
+> the remote gateway returns to on-prem.
+
 1. **Capture Sources**: webcams, HDMI screen-capture dongle.
 2. **K80 Preprocess** (GPU2):
 

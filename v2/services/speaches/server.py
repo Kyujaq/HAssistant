@@ -82,9 +82,10 @@ def health():
         "ok": True,
         "device": "cuda" if USE_CUDA else "cpu",
         "whisper_model": WHISPER_MODEL,
-        "sample_rate": SAMPLE_RATE,
+        "sample_rate": VOICE_SAMPLE_RATE,
         "tts_status": "piper" if (PIPER_AVAILABLE and VOICE_MODEL_PATH) else "unavailable",
         "tts_voice": str(VOICE_MODEL_PATH) if VOICE_MODEL_PATH else None,
+        "piper_voice": VOICE_MODEL_PATH.stem if VOICE_MODEL_PATH else None,
     }
 
 

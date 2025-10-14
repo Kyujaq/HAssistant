@@ -1,0 +1,17 @@
+title: Speech
+path: speech
+cards:
+  - type: entities
+    title: Speaches
+    entities:
+      - sensor.speaches_health
+      - sensor.speaches_stt_latency
+      - sensor.speaches_tts_latency
+      - switch.tts_fallback_wyoming_piper
+  - type: history-graph
+    title: Latency (6h)
+    entities:
+      - sensor.speaches_stt_latency
+      - sensor.speaches_tts_latency
+    hours_to_show: 6
+    refresh_interval: 60

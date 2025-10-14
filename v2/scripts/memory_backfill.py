@@ -66,6 +66,34 @@ def collect_sources(root: Path) -> List[MemoryItem]:
     return items
 
 
+def load_seed_sources(path: Path) -> List[MemoryItem]:
+    if not path.exists():
+        return []
+
+    items: List[MemoryItem] = []
+    try:
+        raw_lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return items
+
+    for idx, line in enumerate(raw_lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        text = str(payload.get("text", "")).strip()
+        if not text:
+            continue
+        kind = str(payload.get("kind", "note") or "note")
+        source = str(payload.get("source", "seed") or "seed")
+        identifier = str(uuid5(NAMESPACE_URL, f"seed::{idx}::{text}"))
+        items.append(MemoryItem(identifier=identifier, text=text, source=source, kind=kind))
+    return items
+
+
 def load_resume_state(path: Path) -> int:
     if not path.exists():
         return 0
@@ -124,8 +152,14 @@ async def run_backfill(args: argparse.Namespace) -> None:
     sources = collect_sources(Path("v1"))
     total = len(sources)
     if not sources:
-        print("No sources discovered under v1/ - exiting.")
-        return
+        seed_path = Path("sample_data/memory_seed.jsonl")
+        print(f"No sources discovered under v1/ - checking seed dataset at {seed_path}")
+        sources = load_seed_sources(seed_path)
+        total = len(sources)
+        if not sources:
+            print("No sample seed data found; exiting without backfill.")
+            return
+        print(f"Loaded {total} seed memories from sample_data/memory_seed.jsonl")
 
     cursor = load_resume_state(args.resume)
     print(f"Starting backfill from cursor {cursor} of {total} items (batch={args.batch})")
