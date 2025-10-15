@@ -1,0 +1,38 @@
+views:
+  - title: Memory
+    path: memory
+    icon: mdi:database
+    cards:
+      - type: horizontal-stack
+        cards:
+          - type: gauge
+            name: Total Memories
+            entity: sensor.memory_total
+            min: 0
+            max: 500
+            severity:
+              green: 0
+              yellow: 200
+              red: 400
+          - type: gauge
+            name: Pending Sync
+            entity: sensor.memory_pending
+            min: 0
+            max: 100
+            severity:
+              green: 0
+              yellow: 20
+              red: 50
+      - type: history-graph
+        title: Search Latency
+        entities:
+          - sensor.memory_search_latency
+        hours_to_show: 24
+        refresh_interval: 30
+      - type: markdown
+        title: Last Memory Queries
+        content: >
+          {% set queries = state_attr('sensor.memory_total', 'last_queries') or [] %}
+          {% for item in queries[:5] %}
+          - {{ item.query }} ({{ item.results }} hits)
+          {% endfor %}

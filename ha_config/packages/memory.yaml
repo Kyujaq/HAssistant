@@ -1,0 +1,51 @@
+homeassistant:
+  customize:
+    sensor.memory_total:
+      icon: mdi:database
+    sensor.memory_pending:
+      icon: mdi:clock-alert
+    sensor.memory_search_latency:
+      icon: mdi:chart-line
+
+sensor:
+  - platform: rest
+    name: Memory Total
+    resource: http://letta-bridge:8010/stats
+    method: GET
+    value_template: "{{ value_json.total }}"
+    json_attributes:
+      - embedded
+      - pending
+      - last_queries
+    timeout: 10
+    scan_interval: 60
+  - platform: rest
+    name: Memory Pending
+    resource: http://letta-bridge:8010/stats
+    method: GET
+    value_template: "{{ value_json.pending }}"
+    timeout: 10
+    scan_interval: 60
+  - platform: rest
+    name: Memory Search Latency
+    resource: http://memory-embed:8001/metrics
+    method: GET
+    value_template: >
+      {% set value = value | default('') %}
+      {% set sum = value | regex_findall_index('memembed_latency_seconds_sum{route="search"} ([0-9eE\+\.-]+)', 0) | float(0) %}
+      {% set count = value | regex_findall_index('memembed_latency_seconds_count{route="search"} ([0-9eE\+\.-]+)', 0) | float(0) %}
+      {{ (sum / count) if count > 0 else 0 }}
+    unit_of_measurement: s
+    timeout: 10
+    scan_interval: 60
+
+switch:
+  - platform: rest
+    name: Memory Ingest
+    resource: http://letta-bridge:8010/config
+    body_on: '{"ingest": true}'
+    body_off: '{"ingest": false}'
+    is_on_template: "{{ value_json.ingest }}"
+    headers:
+      Content-Type: application/json
+    timeout: 10
