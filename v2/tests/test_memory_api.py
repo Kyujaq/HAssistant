@@ -35,11 +35,16 @@ class FakeConnection:
     async def execute(self, query: str, params: Any) -> FakeCursor:
         if query.startswith("INSERT INTO memories"):
             memory_id = params[0]
+            meta_param = params[4]
+            if hasattr(meta_param, "obj"):
+                meta_value = meta_param.obj
+            else:
+                meta_value = meta_param
             self.memories[memory_id] = {
                 "kind": params[1],
                 "source": params[2],
                 "text": params[3],
-                "meta": params[4],
+                "meta": meta_value,
             }
             return FakeCursor()
 
@@ -75,9 +80,14 @@ class FakeConnManager:
         return None
 
 
+class _VectorStub(list):
+    def tolist(self):
+        return list(self)
+
+
 class StubModel:
     def encode(self, texts, normalize_embeddings=True):
-        return [[1.0, 0.0, 0.0] for _ in texts]
+        return [_VectorStub([1.0, 0.0, 0.0]) for _ in texts]
 
 
 def test_upsert_and_search(monkeypatch):
