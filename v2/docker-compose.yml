@@ -13,29 +13,54 @@
 name: hassistant_v2
 
 services:
-  # Ollama chat service - hosts Hermes3 (persona) and Qwen3-4B (reasoning)
-  ollama-chat:
+  # Ollama text service - hosts Hermes3 (fast) and Qwen3-4B (deeper text) on GTX 1070
+  ollama-text:
     image: ollama/ollama:latest
-    container_name: hassistant_v2_ollama_chat
+    container_name: hassistant_v2_ollama_text
     runtime: nvidia
     environment:
-      - NVIDIA_VISIBLE_DEVICES=${CHAT_GPU_INDEX:-1}  # Pin to GPU1 (GTX 1070)
-      - OLLAMA_KEEP_ALIVE=3h      # Keep models loaded for faster response
+      - NVIDIA_VISIBLE_DEVICES=0          # Pin to GPU0 (GTX 1070)
+      - OLLAMA_KEEP_ALIVE=3h
       - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_NUM_PARALLEL=1             # Avoid competing with STT bursts
     ports:
-      - "11434:11434"
+      - "11435:11434"                     # Expose on 11435 for clarity
     volumes:
-      - ollama_data:/root/.ollama
+      - ollama_text_data:/root/.ollama
     healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:11434/api/version >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 90s
     restart: on-failure:3
     networks:
       default:
-        aliases: ["ollama-chat"]
+        aliases: ["ollama-text", "ollama-chat"]  # Keep ollama-chat alias for backwards compatibility
+
+  # Ollama VL service - hosts Qwen-VL-8B for opportunistic text escalation on GTX 1080 Ti
+  ollama-vl:
+    image: ollama/ollama:latest
+    container_name: hassistant_v2_ollama_vl
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=1          # Pin to GPU1 (GTX 1080 Ti)
+      - OLLAMA_KEEP_ALIVE=3h
+      - OLLAMA_HOST=0.0.0.0:11434
+    ports:
+      - "11436:11434"
+    volumes:
+      - ollama_vl_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:11434/api/version >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 90s
+    restart: on-failure:3
+    networks:
+      default:
+        aliases: ["ollama-vl"]
 
   # Speaches - OpenAI-compatible STT (faster-whisper CUDA) + Piper TTS
   speaches:
@@ -173,13 +198,27 @@ services:
       retries: 5
     restart: on-failure:3
 
-  # GLaDOS Orchestrator - Memory-aware chat service (Step 2.5)
+  # GLaDOS Orchestrator - Memory-aware chat service with intelligent routing
   orchestrator:
     build: { context: ./services/glados-orchestrator }
     container_name: hassistant_v2_orchestrator
     environment:
-      - OLLAMA_URL=http://ollama-chat:11434
-      - OLLAMA_MODEL=hermes3:latest
+      # Text models (GTX 1070)
+      - OLLAMA_TEXT_URL=http://ollama-text:11434
+      - OLLAMA_TEXT_MODEL=qwen3:4b                # Deeper text fallback
+      - OLLAMA_TEXT_MODEL_FAST=hermes3:latest     # Fast/simple queries
+      # VL model (GTX 1080 Ti)
+      - OLLAMA_VL_URL=http://ollama-vl:11434
+      - OLLAMA_MODEL_VL=qwen2.5:3b                # VL model (update when VL-8B pulled)
+      # Router configuration
+      - VL_GPU_INDEX=1                            # GTX 1080 Ti index
+      - VL_IDLE_UTIL_MAX=0.50                     # 50% 5s avg => idle
+      - VL_MIN_MEM_FREE_GB=3.0                    # Min free VRAM for VL
+      - VL_QUEUE_MAX_WAIT_MS=400                  # Max queue wait
+      - VL_TEXT_ENABLED=1                         # Enable VL for text (HA toggle)
+      - VL_STICKY_TURNS_MIN=5                     # Sticky sessions on VL
+      - VL_TEXT_TOKEN_LIMIT=768                   # Cap VL text tokens
+      # Memory configuration
       - MEMORY_URL=http://letta-bridge:8010
       - LETTABRIDGE_URL=http://letta-bridge:8010
       - MEMORY_AUTOSAVE_ON=1
@@ -191,7 +230,8 @@ services:
       - MEMORY_CONNECT_TIMEOUT=2.0
       - MEMORY_READ_TIMEOUT=6.0
     depends_on:
-      ollama-chat: { condition: service_healthy }
+      ollama-text: { condition: service_healthy }
+      ollama-vl: { condition: service_healthy }
       letta-bridge: { condition: service_healthy }
       memory-embed: { condition: service_healthy }
     ports:
@@ -243,8 +283,10 @@ services:
         aliases: ["dozzle"]
 
 volumes:
-  ollama_data:
-    name: hassistant_v2_ollama_data
+  ollama_text_data:
+    name: hassistant_v2_ollama_text_data
+  ollama_vl_data:
+    name: hassistant_v2_ollama_vl_data
   piper_voices:
     name: hassistant_v2_piper_voices
   piper_data:

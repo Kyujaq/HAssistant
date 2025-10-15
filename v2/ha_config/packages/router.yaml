@@ -1,0 +1,175 @@
+# Router Integration Package
+# Step 2.6: VL Router - GPU-aware model selection
+# Provides controls and monitoring for intelligent LLM routing
+
+homeassistant:
+  customize:
+    switch.vl_text_routing:
+      icon: mdi:router-wireless
+    sensor.vl_queue_length:
+      icon: mdi:format-list-numbered
+    sensor.vl_idle:
+      icon: mdi:power-sleep
+    sensor.vl_text_fallbacks:
+      icon: mdi:backup-restore
+    sensor.vl_gpu_utilization:
+      icon: mdi:gauge
+    sensor.vl_gpu_memory_free:
+      icon: mdi:memory
+
+# Controls
+switch:
+  - platform: rest
+    name: VL Text Routing
+    resource: http://orchestrator:8020/router/vl_text_enabled
+    body_on: '{"enabled": true}'
+    body_off: '{"enabled": false}'
+    is_on_template: "{{ value_json.enabled | default(true) }}"
+    headers:
+      Content-Type: application/json
+    scan_interval: 30
+
+# Sensors
+sensor:
+  # Queue and idle status (fast - 10s)
+  - platform: rest
+    name: VL Queue Length
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set x = namespace(v=0) %}
+      {% for l in value.split('\n') %}
+        {% if l.startswith('orchestrator_vl_queue_len ') %}
+          {% set x.v = l.split(' ')[1]|float %}
+        {% endif %}
+      {% endfor %}
+      {{ x.v | int }}
+    unit_of_measurement: "jobs"
+    scan_interval: 10
+    timeout: 5
+
+  - platform: rest
+    name: VL Idle
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set x = namespace(v=0) %}
+      {% for l in value.split('\n') %}
+        {% if l.startswith('orchestrator_vl_idle ') %}
+          {% set x.v = l.split(' ')[1]|float %}
+        {% endif %}
+      {% endfor %}
+      {{ (x.v > 0) | lower }}
+    scan_interval: 10
+    timeout: 5
+
+  # GPU metrics (medium - 30s)
+  - platform: rest
+    name: VL GPU Utilization
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set x = namespace(v=0) %}
+      {% for l in value.split('\n') %}
+        {% if l.startswith('orchestrator_vl_util ') %}
+          {% set x.v = l.split(' ')[1]|float * 100 %}
+        {% endif %}
+      {% endfor %}
+      {{ x.v | round(1) }}
+    unit_of_measurement: "%"
+    scan_interval: 30
+    timeout: 5
+
+  - platform: rest
+    name: VL GPU Memory Free
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set x = namespace(v=0) %}
+      {% for l in value.split('\n') %}
+        {% if l.startswith('orchestrator_vl_mem_free_gb ') %}
+          {% set x.v = l.split(' ')[1]|float %}
+        {% endif %}
+      {% endfor %}
+      {{ x.v | round(2) }}
+    unit_of_measurement: "GB"
+    scan_interval: 30
+    timeout: 5
+
+  # Routing counters (slow - 60s)
+  - platform: rest
+    name: VL Text Fallbacks
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set x = namespace(v=0) %}
+      {% for l in value.split('\n') %}
+        {% if l.startswith('route_vl_text_fallbacks_total ') %}
+          {% set x.v = l.split(' ')[1]|int %}
+        {% endif %}
+      {% endfor %}
+      {{ x.v }}
+    unit_of_measurement: "fallbacks"
+    scan_interval: 60
+    timeout: 5
+
+  - platform: rest
+    name: VL Text Hits
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set x = namespace(v=0) %}
+      {% for l in value.split('\n') %}
+        {% if l.startswith('route_vl_text_hits_total ') %}
+          {% set x.v = l.split(' ')[1]|int %}
+        {% endif %}
+      {% endfor %}
+      {{ x.v }}
+    unit_of_measurement: "hits"
+    scan_interval: 60
+    timeout: 5
+
+  - platform: rest
+    name: Route Fast Hits
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set x = namespace(v=0) %}
+      {% for l in value.split('\n') %}
+        {% if l.startswith('route_fast_hits_total ') %}
+          {% set x.v = l.split(' ')[1]|int %}
+        {% endif %}
+      {% endfor %}
+      {{ x.v }}
+    unit_of_measurement: "hits"
+    scan_interval: 60
+    timeout: 5
+
+  - platform: rest
+    name: Route 4B Hits
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set x = namespace(v=0) %}
+      {% for l in value.split('\n') %}
+        {% if l.startswith('route_4b_hits_total ') %}
+          {% set x.v = l.split(' ')[1]|int %}
+        {% endif %}
+      {% endfor %}
+      {{ x.v }}
+    unit_of_measurement: "hits"
+    scan_interval: 60
+    timeout: 5
+
+# Automations
+automation:
+  - id: router_vl_high_fallback_alert
+    alias: Router - VL High Fallback Alert
+    description: Alert if VL fallback rate > 50% in last hour
+    trigger:
+      - platform: template
+        value_template: >
+          {% set fallbacks = states('sensor.vl_text_fallbacks') | int %}
+          {% set hits = states('sensor.vl_text_hits') | int %}
+          {% set total = fallbacks + hits %}
+          {{ (total > 10) and ((fallbacks / total) > 0.5) }}
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "VL Router High Fallback Rate"
+          message: >
+            VL fallback rate > 50%. Check GPU utilization and queue.
+            Fallbacks: {{ states('sensor.vl_text_fallbacks') }}
+            Hits: {{ states('sensor.vl_text_hits') }}
