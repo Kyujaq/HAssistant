@@ -27,11 +27,11 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
-      test: ["CMD-SHELL","curl -fsS --max-time 2 http://127.0.0.1:11434/api/version >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-      start_period: 90s   
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
     restart: on-failure:3
     networks:
       default:
@@ -119,7 +119,7 @@ services:
         aliases: ["wyoming-piper"]
 
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     container_name: hassistant_v2_pg
     environment:
       POSTGRES_DB: glados
@@ -166,6 +166,42 @@ services:
       postgres: { condition: service_healthy }
     ports:
       - "8010:8010"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8010/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    restart: on-failure:3
+
+  # GLaDOS Orchestrator - Memory-aware chat service (Step 2.5)
+  orchestrator:
+    build: { context: ./services/glados-orchestrator }
+    container_name: hassistant_v2_orchestrator
+    environment:
+      - OLLAMA_URL=http://ollama-chat:11434
+      - OLLAMA_MODEL=hermes3:latest
+      - MEMORY_URL=http://letta-bridge:8010
+      - LETTABRIDGE_URL=http://letta-bridge:8010
+      - MEMORY_AUTOSAVE_ON=1
+      - MEMORY_TOP_K=6
+      - MEMORY_MIN_SCORE=0.62
+      - MEMORY_MAX_CTX_CHARS=1200
+      - MEMORY_DURABLE_THRESHOLD=80
+      - MEMORY_CACHE_SIZE=50
+      - MEMORY_CONNECT_TIMEOUT=2.0
+      - MEMORY_READ_TIMEOUT=6.0
+    depends_on:
+      ollama-chat: { condition: service_healthy }
+      letta-bridge: { condition: service_healthy }
+      memory-embed: { condition: service_healthy }
+    ports:
+      - "8020:8020"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8020/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: on-failure:3
 
   memory-backfill:
@@ -188,6 +224,24 @@ services:
       postgres: { condition: service_healthy }
     restart: "no"
 
+  dozzle:
+    image: ghcr.io/amir20/dozzle:latest
+    container_name: hassistant_v2_dozzle
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # read-only
+    ports:
+      - "9999:8080"   # host:container
+    environment:
+      - DOZZLE_LEVEL=info
+      - DOZZLE_TAILSIZE=300
+      # Optional basic auth:
+      # - DOZZLE_USERNAME=admin
+      # - DOZZLE_PASSWORD=yourpassword
+    restart: unless-stopped
+    networks:
+      default:
+        aliases: ["dozzle"]
+
 volumes:
   ollama_data:
     name: hassistant_v2_ollama_data
@@ -202,6 +256,8 @@ volumes:
   memembed_cache:
     name: hassistant_v2_memembed_cache  # Cache for embedding model
 
+    
+
 # ---- Step 3 (Deferred): Vision/K80 VM integration ---------------------------
 # profiles:
 #   - vision
@@ -214,6 +270,8 @@ volumes:
 #       - VISION_VM_URL=${VISION_VM_URL:-http://k80-vm:9000}
 #     restart: on-failure:3
 #     profiles: ["vision"]
+
+
 
 networks:
   default:

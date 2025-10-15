@@ -11,6 +11,8 @@ from fastapi import Body, FastAPI, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from faster_whisper import WhisperModel
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from fastapi.middleware.cors import CORSMiddleware
+from shutil import which
 
 # Configuration from environment
 USE_CUDA = os.getenv("USE_CUDA", "0") == "1"
@@ -63,6 +65,7 @@ else:
 PIPER_AVAILABLE = (
     PIPER_BINARY is not None and PIPER_BINARY.exists() and os.access(PIPER_BINARY, os.X_OK)
 )
+PYTHON_FALLBACK = which("python3.9") or which("python3")
 
 # Initialize Whisper model
 print(f"🔧 Initializing Whisper model: {WHISPER_MODEL} (CUDA: {USE_CUDA})")
@@ -73,6 +76,13 @@ whisper_model = WhisperModel(
 )
 
 app = FastAPI(title="Speaches - OpenAI-Compatible STT/TTS", version="2.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
+)
 
 
 @app.get("/health")
@@ -126,17 +136,25 @@ async def transcribe(file: UploadFile):
 
 
 async def _piper_stream(text: str, start_time: float) -> AsyncGenerator[bytes, None]:
-    if not PIPER_AVAILABLE:
-        raise HTTPException(status_code=500, detail="Piper binary not available")
+    if not (PYTHON_FALLBACK or PIPER_AVAILABLE):
+        raise HTTPException(status_code=500, detail="Piper binary/module not available")
     if not VOICE_MODEL_PATH:
         raise HTTPException(status_code=500, detail="Piper voice model not found")
 
-    args = [
-        str(PIPER_BINARY),
-        "--model",
-        str(VOICE_MODEL_PATH),
-        "--output_raw",
-    ]
+    if PYTHON_FALLBACK:
+        args = [PYTHON_FALLBACK, "-m", "piper"]
+    elif PIPER_AVAILABLE:
+        args = [str(PIPER_BINARY)]
+    else:
+        raise HTTPException(status_code=500, detail="Piper runtime unavailable")
+
+    args.extend(
+        [
+            "--model",
+            str(VOICE_MODEL_PATH),
+            "--output_raw",
+        ]
+    )
     if VOICE_CONFIG_PATH:
         args.extend(["--config", str(VOICE_CONFIG_PATH)])
     if PIPER_SPEAKER:

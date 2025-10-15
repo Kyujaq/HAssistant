@@ -6,8 +6,14 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from sentence_transformers import SentenceTransformer
+from psycopg.types.json import Json
 
-from . import db
+try:
+    from . import db
+except ImportError:  # pragma: no cover
+    import importlib
+
+    db = importlib.import_module("db")
 
 MODEL_NAME = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 DEFAULT_TOP_K = int(os.getenv("TOP_K", "8"))
@@ -73,7 +79,7 @@ async def upsert(payload: dict = Body(...)) -> JSONResponse:
             "source = EXCLUDED.source, "
             "text = EXCLUDED.text, "
             "meta = EXCLUDED.meta",
-            (str(memory_id), kind, source, text, meta),
+            (str(memory_id), kind, source, text, Json(meta)),
         )
         await conn.execute(
             "INSERT INTO embeddings(memory_id, vec) VALUES(%s, %s) "
@@ -115,7 +121,7 @@ async def search(payload: dict = Body(...)) -> JSONResponse:
         {
             "results": [
                 {
-                    "id": row[0],
+                    "id": str(row[0]),
                     "text": row[1],
                     "meta": row[2],
                     "score": float(row[3]),

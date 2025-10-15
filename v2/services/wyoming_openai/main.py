@@ -5,6 +5,7 @@ from typing import Optional
 import httpx
 from fastapi import Body, FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 
 ASR_URL = os.getenv("ASR_URL", "")
@@ -17,6 +18,13 @@ _fallback_lock = asyncio.Lock()
 tts_fallback_enabled = False  # guarded by _fallback_lock
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
+)
 
 
 @app.get("/healthz")

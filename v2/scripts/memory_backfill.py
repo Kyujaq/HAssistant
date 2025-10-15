@@ -15,6 +15,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 import httpx
 import psycopg
+from psycopg.types.json import Json
 
 DEFAULT_BATCH_SIZE = 256
 EMBED_BATCH_SIZE = 128
@@ -123,7 +124,7 @@ async def upsert_batch(conn: psycopg.AsyncConnection, items: Sequence[MemoryItem
                 "INSERT INTO memories(id, kind, source, text, meta) "
                 "VALUES(%s, %s, %s, %s, %s) "
                 "ON CONFLICT (id) DO UPDATE SET source = EXCLUDED.source, text = EXCLUDED.text",
-                (item.identifier, item.kind, "import", item.text, {"source": item.source}),
+                (item.identifier, item.kind, "import", item.text, Json({"source": item.source})),
             )
             await conn.execute(
                 "INSERT INTO embeddings(memory_id, vec) VALUES(%s, %s) "

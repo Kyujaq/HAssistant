@@ -1,0 +1,8 @@
+
+# Home Assistant secrets and tokens
+ha_config/.storage/
+v1/application_credentials
+v1/assist_pipeline.pipelines
+
+# Backups
+ha_config/backups/
