@@ -28,7 +28,7 @@ services:
     volumes:
       - ollama_text_data:/root/.ollama
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:11434/api/version >/dev/null || exit 1"]
+      test: ["CMD", "ollama", "list"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -52,7 +52,7 @@ services:
     volumes:
       - ollama_vl_data:/root/.ollama
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:11434/api/version >/dev/null || exit 1"]
+      test: ["CMD", "ollama", "list"]
       interval: 10s
       timeout: 3s
       retries: 10

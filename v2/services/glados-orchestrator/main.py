@@ -90,6 +90,12 @@ async def gpu_info() -> JSONResponse:
     return JSONResponse(get_gpu_info())
 
 
+@app.get("/router/vl_text_enabled")
+async def vl_toggle_state() -> JSONResponse:
+    """Get current VL text routing state (HA integration)"""
+    return JSONResponse({"enabled": VL_TEXT_ENABLED})
+
+
 @app.post("/router/vl_text_enabled")
 async def vl_toggle(payload: dict = Body(...)) -> JSONResponse:
     """Toggle VL text routing on/off (HA integration)"""
