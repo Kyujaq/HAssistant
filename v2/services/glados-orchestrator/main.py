@@ -1,7 +1,8 @@
 """
 GLaDOS Orchestrator - Memory-aware chat service with intelligent routing
-Step 2.5: Memory ↔ LLM Integration
+Step 2.5: Memory <-> LLM Integration
 Step 2.6: VL Router - GPU-aware model selection
+"""
 """
 import os
 import uuid
@@ -9,10 +10,12 @@ import time
 import json
 import hashlib
 import logging
+import threading
 from typing import Any, Dict, List
 from collections import defaultdict, deque
 
 from fastapi import FastAPI, Body
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_client import Histogram, Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
 import httpx
@@ -21,6 +24,36 @@ from background import Bg
 from memory_client import MemoryClient
 from memory_policy import worth_saving, redact, compute_hash
 from nvml import sample_vl, get_gpu_info
+
+os.umask(0o022)
+
+# Inventory state (in-memory with file persistence)
+STATE_DIR = "/app/state"
+INVENTORY_SCHEMA_VERSION = 1
+INVENTORY_FILE = os.path.join(STATE_DIR, "inventory.json")
+inventory_lock = threading.Lock()
+inventory_data = {
+    "schema_version": INVENTORY_SCHEMA_VERSION,
+    "items": {},
+    "updated_at": None,
+}
+
+# Config state (in-memory)
+config_state = {
+    "privacy_pause": False,
+    "energy_band": "medium",
+    "focus_mode": "admin"
+}
+
+# Config metrics mapping
+CONFIG_STATE_G = Gauge("orchestrator_config_state", "Configuration toggles (numeric)", ["key"])
+ENERGY_BAND_VALUES = {"low": 0, "medium": 1, "high": 2}
+FOCUS_MODE_VALUES = {"errands": 0, "admin": 1, "deep": 2}
+VALID_ENERGY_BANDS = set(ENERGY_BAND_VALUES.keys())
+VALID_FOCUS_MODES = set(FOCUS_MODE_VALUES.keys())
+
+# Last reply cache for HA automations
+last_reply_state: Dict[str, Any] = {"turn_id": None, "text": "", "when": None}
 
 # Ollama endpoints configuration
 OLLAMA_TEXT_URL = os.getenv("OLLAMA_TEXT_URL", "http://ollama-text:11434")
@@ -66,6 +99,10 @@ VISION_EVENTS_TOTAL = Counter(
     "Vision events received from K80 router",
     ["source", "kind"],
 )
+PRIVACY_PAUSE_TOTAL = Counter(
+    "orchestrator_privacy_paused_total",
+    "Chat requests blocked by privacy pause",
+)
 
 # Router state
 vl_queue = deque(maxlen=64)  # Lightweight queue tracker
@@ -78,6 +115,13 @@ logger = logging.getLogger(__name__)
 
 # Initialize app and services
 app = FastAPI(title="glados-orchestrator")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 bg = Bg()
 mem = MemoryClient()
 
@@ -168,6 +212,261 @@ async def vision_event(event: Dict[str, Any] = Body(...)) -> JSONResponse:
         )
 
     return JSONResponse({"ok": True})
+
+
+# ===== Inventory Endpoints =====
+
+@app.get("/inventory/snapshot")
+async def inventory_snapshot() -> JSONResponse:
+    """
+    Return current inventory snapshot.
+
+    Returns:
+        - count: Number of items
+        - items: Dict of item_name -> {quantity, unit, location, ...}
+        - updated_at: ISO timestamp of last update
+    """
+    with inventory_lock:
+        snapshot = {
+            "schema_version": inventory_data.get("schema_version", INVENTORY_SCHEMA_VERSION),
+            "count": len(inventory_data["items"]),
+            "items": inventory_data["items"],
+            "updated_at": inventory_data["updated_at"] or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+    return JSONResponse(snapshot)
+
+
+@app.post("/inventory/upsert")
+async def inventory_upsert(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
+    """
+    Update or insert inventory item.
+
+    Request body:
+        - name: Item name (required)
+        - quantity: Number (default 1)
+        - unit: Unit string (default "count")
+        - location: Storage location (optional)
+        - notes: Additional notes (optional)
+    """
+    item_name = str(payload.get("name", "")).strip()
+    if not item_name:
+        return JSONResponse({"error": "name required"}, status_code=400)
+
+    with inventory_lock:
+        existing = inventory_data["items"].get(item_name, {})
+        quantity = payload.get("quantity", payload.get("qty", existing.get("quantity", 1)))
+        try:
+            quantity = float(quantity)
+        except (TypeError, ValueError):
+            quantity = existing.get("quantity", 1)
+
+        if isinstance(quantity, float) and quantity.is_integer():
+            quantity = int(quantity)
+
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        inventory_data["items"][item_name] = {
+            "name": item_name,
+            "quantity": quantity,
+            "unit": payload.get("unit", existing.get("unit", "count")),
+            "location": payload.get("location", existing.get("location", "unknown")),
+            "notes": payload.get("notes", existing.get("notes", "")),
+            "updated_at": timestamp,
+        }
+        inventory_data["updated_at"] = timestamp
+        inventory_data["schema_version"] = INVENTORY_SCHEMA_VERSION
+        item_snapshot = dict(inventory_data["items"][item_name])
+
+    # Persist to file (fire-and-forget)
+    bg.spawn(_save_inventory(), name="save_inventory")
+
+    logger.info(f"Inventory updated: {item_name} = {item_snapshot}")
+    return JSONResponse({"ok": True, "item": item_name})
+
+
+@app.post("/inventory/sync_json")
+async def inventory_sync_json(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
+    """
+    Bulk sync inventory from HA JSON sensor.
+
+    Request body:
+        - items: Dict or list of inventory items
+    """
+    incoming_items = payload.get("items", {})
+    sanitized: Dict[str, Any] = {}
+
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    if isinstance(incoming_items, dict):
+        for raw_name, raw_entry in incoming_items.items():
+            name = str(raw_name or "").strip()
+            if not name:
+                continue
+            entry = dict(raw_entry) if isinstance(raw_entry, dict) else {"quantity": raw_entry}
+            quantity = entry.get("quantity", entry.get("qty", entry.get("count", 1)))
+            try:
+                quantity = float(quantity)
+            except (TypeError, ValueError):
+                quantity = 1
+            if isinstance(quantity, float) and quantity.is_integer():
+                quantity = int(quantity)
+            sanitized[name] = {
+                "name": name,
+                "quantity": quantity,
+                "unit": entry.get("unit", entry.get("units", "count")),
+                "location": entry.get("location", entry.get("zone", "unknown")),
+                "notes": entry.get("notes", entry.get("description", "")),
+                "updated_at": entry.get("updated_at") or now,
+            }
+    elif isinstance(incoming_items, list):
+        for entry in incoming_items:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name", "")).strip()
+            if not name:
+                continue
+            quantity = entry.get("quantity", entry.get("qty", entry.get("count", 1)))
+            try:
+                quantity = float(quantity)
+            except (TypeError, ValueError):
+                quantity = 1
+            if isinstance(quantity, float) and quantity.is_integer():
+                quantity = int(quantity)
+            sanitized[name] = {
+                "name": name,
+                "quantity": quantity,
+                "unit": entry.get("unit", entry.get("units", "count")),
+                "location": entry.get("location", entry.get("zone", "unknown")),
+                "notes": entry.get("notes", entry.get("description", "")),
+                "updated_at": entry.get("updated_at") or now,
+            }
+    else:
+        return JSONResponse({"error": "items must be dict or list"}, status_code=400)
+
+    with inventory_lock:
+        inventory_data["items"] = sanitized
+        inventory_data["updated_at"] = now
+        inventory_data["schema_version"] = INVENTORY_SCHEMA_VERSION
+
+    # Persist to file (fire-and-forget)
+    bg.spawn(_save_inventory(), name="save_inventory")
+
+    logger.info(f"Inventory synced: {len(sanitized)} items")
+    return JSONResponse({"ok": True, "count": len(sanitized)})
+
+
+async def _save_inventory():
+    """Persist inventory to file"""
+    try:
+        with inventory_lock:
+            snapshot = json.loads(json.dumps(inventory_data))
+
+        os.makedirs(STATE_DIR, exist_ok=True)
+        tmp_path = f"{INVENTORY_FILE}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(tmp_path, INVENTORY_FILE)
+        os.chmod(INVENTORY_FILE, 0o644)
+    except Exception as e:
+        logger.error(f"Failed to save inventory: {e}")
+        tmp_path = f"{INVENTORY_FILE}.tmp"
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def _update_config_metrics() -> None:
+    """Refresh Prometheus gauges for configuration state."""
+    CONFIG_STATE_G.labels(key="privacy_pause").set(1 if config_state["privacy_pause"] else 0)
+    CONFIG_STATE_G.labels(key="energy_band").set(ENERGY_BAND_VALUES.get(config_state["energy_band"], 1))
+    CONFIG_STATE_G.labels(key="focus_mode").set(FOCUS_MODE_VALUES.get(config_state["focus_mode"], 1))
+
+
+_update_config_metrics()
+
+
+# ===== Config Endpoint =====
+
+@app.get("/config")
+async def get_config() -> JSONResponse:
+    """Get current configuration state"""
+    return JSONResponse(config_state)
+
+
+@app.post("/config")
+async def set_config(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
+    """
+    Update configuration state.
+
+    Accepts partial updates for:
+        - privacy_pause: bool
+        - energy_band: "low" | "medium" | "high"
+        - focus_mode: "deep" | "admin" | "errands"
+    """
+    updated = False
+
+    if "privacy_pause" in payload:
+        config_state["privacy_pause"] = bool(payload["privacy_pause"])
+        logger.info(f"Privacy pause: {config_state['privacy_pause']}")
+        updated = True
+
+    if "energy_band" in payload:
+        band = str(payload["energy_band"]).lower()
+        if band not in VALID_ENERGY_BANDS:
+            return JSONResponse({"error": f"invalid energy_band '{band}'"}, status_code=400)
+        config_state["energy_band"] = band
+        logger.info(f"Energy band: {config_state['energy_band']}")
+        updated = True
+
+    if "focus_mode" in payload:
+        mode = str(payload["focus_mode"]).lower()
+        if mode not in VALID_FOCUS_MODES:
+            return JSONResponse({"error": f"invalid focus_mode '{mode}'"}, status_code=400)
+        config_state["focus_mode"] = mode
+        logger.info(f"Focus mode: {config_state['focus_mode']}")
+        updated = True
+
+    if updated:
+        _update_config_metrics()
+
+    return JSONResponse(config_state)
+
+
+@app.get("/last_reply")
+async def last_reply() -> JSONResponse:
+    """Expose last chat reply for Home Assistant automations."""
+    return JSONResponse(last_reply_state)
+
+
+# ===== Calendar Mirror Endpoint =====
+
+@app.post("/calendar/mirror")
+async def calendar_mirror(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
+    """
+    Mirror calendar event from work to personal.
+
+    Request body:
+        - summary: Event title
+        - start: Start time (ISO format)
+        - end: End time (ISO format)
+
+    Currently a stub - logs the event and returns success.
+    Will be connected to HA calendar webhook in future.
+    """
+    summary = payload.get("summary", "Unknown")
+    start = payload.get("start", "")
+    end = payload.get("end", "")
+
+    logger.info(f"Calendar mirror: {summary} ({start} -> {end})")
+
+    # Future: POST to HA calendar service or webhook
+    # For now, just log and return success
+
+    return JSONResponse({"ok": True, "event": summary})
 
 
 # ===== Routing Helpers =====
@@ -314,9 +613,9 @@ async def route_and_generate(conv_id: str, prompt: str, user_text: str) -> str:
     Intelligent routing: choose model based on complexity and GPU availability.
 
     Routing logic:
-    1. Simple queries → Hermes3 (fast, 20s timeout)
-    2. Deep queries + VL idle → VL model (opportunistic, 30s timeout)
-    3. Deep queries + VL busy → Qwen3-4B fallback (25s timeout)
+    1. Simple queries -> Hermes3 (fast, 20s timeout)
+    2. Deep queries + VL idle -> VL model (opportunistic, 30s timeout)
+    3. Deep queries + VL busy -> Qwen3-4B fallback (25s timeout)
     4. Sticky sessions: keep using VL for N turns after first VL use
 
     Args:
@@ -329,7 +628,7 @@ async def route_and_generate(conv_id: str, prompt: str, user_text: str) -> str:
     """
     now = time.time()
 
-    # 1) Fast path for simple queries → Hermes3
+    # 1) Fast path for simple queries -> Hermes3
     if not is_deep(user_text):
         try:
             ROUTE_FAST_HITS.inc()
@@ -389,7 +688,7 @@ async def chat(payload: Dict = Body(...)) -> JSONResponse:
     """
     Chat endpoint with memory integration.
 
-    Step 2.5: Pre-retrieval → context injection → LLM → post-storage
+    Step 2.5: Pre-retrieval -> context injection -> LLM -> post-storage
 
     Request body:
         - input: User query text (required)
@@ -409,6 +708,25 @@ async def chat(payload: Dict = Body(...)) -> JSONResponse:
     turn_id = str(uuid.uuid4())
     conv_id = payload.get("conversation_id") or turn_id  # Allow client to pass stable conv ID
     logger.info(f"Chat request turn_id={turn_id} conv_id={conv_id[:8]}: {user_text[:50]}...")
+
+    if config_state.get("privacy_pause"):
+        reply = "Privacy pause is active. No processing performed."
+        last_reply_state.update(
+            {
+                "turn_id": turn_id,
+                "text": reply,
+                "when": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+        )
+        PRIVACY_PAUSE_TOTAL.inc()
+        logger.info("Privacy pause active; dropping chat request.")
+        return JSONResponse({
+            "turn_id": turn_id,
+            "reply": reply,
+            "memory_hits": 0,
+            "ctx_chars": 0,
+            "privacy_pause": True
+        })
 
     # --- PRE-RETRIEVAL ---
     t0 = time.time()
@@ -498,12 +816,21 @@ Assistant:"""
 
     logger.info(f"Post-storage: {post_ms:.1f}ms")
 
-    return JSONResponse({
+    response_payload = {
         "turn_id": turn_id,
         "reply": reply,
         "memory_hits": len(hits),
         "ctx_chars": len(ctx)
-    })
+    }
+    last_reply_state.update(
+        {
+            "turn_id": turn_id,
+            "text": reply,
+            "when": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+    )
+
+    return JSONResponse(response_payload)
 
 
 @app.post("/v1/chat/completions")
@@ -511,7 +838,7 @@ async def openai_chat_completions(payload: Dict = Body(...)) -> JSONResponse:
     """
     OpenAI-compatible chat completions endpoint for Home Assistant integration.
 
-    Step 2.7: Assist ↔ Orchestrator Bridge
+    Step 2.7: Assist -> Orchestrator Bridge
 
     Accepts OpenAI format and forwards to /chat endpoint with memory integration.
 
@@ -607,6 +934,63 @@ async def openai_chat_completions(payload: Dict = Body(...)) -> JSONResponse:
     logger.info(f"OpenAI API call completed: turn_id={turn_id}, memory_hits={chat_response.get('memory_hits', 0)}")
 
     return JSONResponse(openai_response)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Load inventory from file on startup"""
+    global inventory_data
+    _update_config_metrics()
+    if os.path.exists(INVENTORY_FILE):
+        try:
+            with open(INVENTORY_FILE, "r") as f:
+                data = json.load(f)
+
+            raw_items = data.get("items", {})
+            normalized: Dict[str, Any] = {}
+
+            if isinstance(raw_items, dict):
+                iterable = raw_items.items()
+            elif isinstance(raw_items, list):
+                iterable = [
+                    (entry.get("name"), entry)
+                    for entry in raw_items
+                    if isinstance(entry, dict)
+                ]
+            else:
+                iterable = []
+
+            for raw_name, raw_entry in iterable:
+                name = str(raw_name or "").strip()
+                if not name:
+                    continue
+                entry = dict(raw_entry) if isinstance(raw_entry, dict) else {"quantity": raw_entry}
+                quantity = entry.get("quantity", entry.get("qty", entry.get("count", 1)))
+                try:
+                    quantity = float(quantity)
+                except (TypeError, ValueError):
+                    quantity = 1
+                if isinstance(quantity, float) and quantity.is_integer():
+                    quantity = int(quantity)
+
+                normalized[name] = {
+                    "name": name,
+                    "quantity": quantity,
+                    "unit": entry.get("unit", entry.get("units", "count")),
+                    "location": entry.get("location", entry.get("zone", "unknown")),
+                    "notes": entry.get("notes", entry.get("description", "")),
+                    "updated_at": entry.get("updated_at") or data.get("updated_at") or now,
+                }
+
+            inventory_data = {
+                "schema_version": data.get("schema_version", INVENTORY_SCHEMA_VERSION),
+                "items": normalized,
+                "updated_at": data.get("updated_at"),
+            }
+
+            logger.info(f"Loaded inventory: {len(normalized)} items")
+        except Exception as e:
+            logger.warning(f"Failed to load inventory: {e}")
 
 
 @app.on_event("shutdown")

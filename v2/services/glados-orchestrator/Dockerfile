@@ -13,4 +13,4 @@ COPY . .
 EXPOSE 8020
 
 # Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8020"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8020", "--proxy-headers"]

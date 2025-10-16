@@ -1,0 +1,175 @@
+     # === Vision Router: HA control & telemetry ===
+     # Assumes the service is reachable at http://vision-router:8050
+     # If your host/port differs, change the 'resource' and rest_command URLs below.
+
+     homeassistant:
+       customize:
+         switch.vision_on:
+           icon: mdi:eye
+         switch.screen_watch_on:
+           icon: mdi:monitor-eye
+         sensor.vision_queue_depth:
+           icon: mdi:queue-first-in-last-out
+         sensor.vision_lock_enabled:
+           icon: mdi:lock
+         sensor.vision_gpu0_util:
+           icon: mdi:chip
+         sensor.vision_gpu0_mem_free_gb:
+           icon: mdi:memory
+         sensor.vision_gpu1_util:
+           icon: mdi:chip
+         sensor.vision_gpu1_mem_free_gb:
+           icon: mdi:memory
+
+     # ---------- Switches (map to /config) ----------
+     switch:
+       - platform: rest
+         name: Vision On
+         resource: http://vision-router:8050/config
+         body_on: '{"vision_on": true}'
+         body_off: '{"vision_on": false}'
+         is_on_template: "{{ value_json.vision_on | default(false) }}"
+         headers:
+           Content-Type: application/json
+
+       - platform: rest
+         name: Screen Watch On
+         resource: http://vision-router:8050/config
+         body_on: '{"screen_watch_on": true}'
+         body_off: '{"screen_watch_on": false}'
+         is_on_template: "{{ value_json.screen_watch_on | default(false) }}"
+         headers:
+           Content-Type: application/json
+
+     # ---------- Controls (runtime tuning via /config) ----------
+     input_number:
+       vision_threshold:
+         name: Vision Escalation Threshold
+         min: 0
+         max: 1
+         step: 0.01
+         mode: slider
+         icon: mdi:tune
+         initial: 0.55
+
+       vision_max_frames:
+         name: Vision Max Frames Per Bundle
+         min: 1
+         max: 12
+         step: 1
+         mode: slider
+         icon: mdi:image-multiple
+         initial: 6
+
+     rest_command:
+       set_vision_config:
+         url: http://vision-router:8050/config
+         method: POST
+         headers:
+           Content-Type: application/json
+         payload: "{{ payload }}"
+
+     # Sync HA controls to router config live
+     automation:
+       - id: vr_update_threshold
+         alias: Vision Router - Update Threshold
+         trigger:
+           - platform: state
+             entity_id: input_number.vision_threshold
+         action:
+           - service: rest_command.set_vision_config
+             data:
+               payload: >
+                 {"threshold": {{ states('input_number.vision_threshold') | float }} }
+
+       - id: vr_update_max_frames
+         alias: Vision Router - Update Max Frames
+         trigger:
+           - platform: state
+             entity_id: input_number.vision_max_frames
+         action:
+           - service: rest_command.set_vision_config
+             data:
+               payload: >
+                 {"max_frames": {{ states('input_number.vision_max_frames') | int }} }
+
+     # ---------- Stats (map to /stats) ----------
+     # JSON structure assumed:
+     # {
+     #   "queue_depth": 0,
+     #   "lock_enabled": false,
+     #   "config": {"vision_on":true,"screen_watch_on":true,"threshold":0.55,"max_frames":6},
+     #   "gpus": [{"index":0,"util":23,"mem_free_gb":8.1,"mem_total_gb":11.2}, ...]
+     # }
+     sensor:
+       - platform: rest
+         name: Vision Queue Depth
+         resource: http://vision-router:8050/stats
+         value_template: "{{ value_json.queue_depth | default(0) }}"
+         scan_interval: 10
+
+       - platform: rest
+         name: Vision Lock Enabled
+         resource: http://vision-router:8050/stats
+         value_template: "{{ value_json.lock_enabled | default(false) }}"
+         scan_interval: 10
+
+       # GPU 0
+       - platform: rest
+         name: Vision GPU0 Util
+         resource: http://vision-router:8050/stats
+         value_template: >
+           {% set g = value_json.gpus | default([]) %}
+           {% if g|length > 0 %}{{ g[0].util | float }}{% else %}0{% endif %}
+         unit_of_measurement: "%"
+         scan_interval: 30
+
+       - platform: rest
+         name: Vision GPU0 Mem Free GB
+         resource: http://vision-router:8050/stats
+         value_template: >
+           {% set g = value_json.gpus | default([]) %}
+           {% if g|length > 0 %}{{ g[0].mem_free_gb | float }}{% else %}0{% endif %}
+         unit_of_measurement: "GB"
+         scan_interval: 30
+
+       # GPU 1 (optional; shows 0 if not present)
+       - platform: rest
+         name: Vision GPU1 Util
+         resource: http://vision-router:8050/stats
+         value_template: >
+           {% set g = value_json.gpus | default([]) %}
+           {% if g|length > 1 %}{{ g[1].util | float }}{% else %}0{% endif %}
+         unit_of_measurement: "%"
+         scan_interval: 30
+
+       - platform: rest
+         name: Vision GPU1 Mem Free GB
+         resource: http://vision-router:8050/stats
+         value_template: >
+           {% set g = value_json.gpus | default([]) %}
+           {% if g|length > 1 %}{{ g[1].mem_free_gb | float }}{% else %}0{% endif %}
+         unit_of_measurement: "GB"
+         scan_interval: 30
+
+     # ---------- Optional: alerts ----------
+     binary_sensor:
+       - platform: template
+         sensors:
+           vision_queue_high:
+             friendly_name: "Vision Queue High"
+             value_template: "{{ states('sensor.vision_queue_depth') | int > 5 }}"
+
+     automation:
+       - id: vr_alert_queue_high
+         alias: Vision Router - High Queue Alert
+         trigger:
+           - platform: state
+             entity_id: binary_sensor.vision_queue_high
+             to: 'on'
+             for: '00:01:00'
+         action:
+           - service: persistent_notification.create
+             data:
+               title: "Vision Router"
+               message: "Queue depth has been > 5 for at least 1 minute."

@@ -1,23 +1,262 @@
 import asyncio
+import io
 import os
+import struct
+import wave
+from contextlib import asynccontextmanager
 from typing import Optional
 
 import httpx
 from fastapi import Body, FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from wyoming.asr import Transcript
+from wyoming.audio import AudioChunk, AudioStart, AudioStop
+from wyoming.event import Event
+from wyoming.info import AsrModel, AsrProgram, Attribution, Describe, Info, TtsProgram, TtsVoice
+from wyoming.tts import Synthesize
+from wyoming.server import AsyncEventHandler, AsyncServer
 
-
+# Configuration
 ASR_URL = os.getenv("ASR_URL", "")
 TTS_URL = os.getenv("TTS_URL", "")
 FALLBACK_TTS_HOST = os.getenv("FALLBACK_TTS_HOST", "wyoming-piper")
 FALLBACK_TTS_PORT = int(os.getenv("FALLBACK_TTS_PORT", "10200"))
 FALLBACK_TTS_URL = os.getenv("FALLBACK_TTS_URL", "")
+SAMPLE_RATE = 22050
+CHUNK_SIZE = 8192  # 8KB chunks for streaming
 
 _fallback_lock = asyncio.Lock()
 tts_fallback_enabled = False  # guarded by _fallback_lock
 
-app = FastAPI()
+# Servers
+stt_server: Optional[AsyncServer] = None
+tts_server: Optional[AsyncServer] = None
+
+
+# Wyoming STT Handler
+class SpeachesSTTHandler(AsyncEventHandler):
+    """Wyoming STT handler that bridges to Speaches"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.audio_buffer = bytearray()
+        self.sample_rate = 16000  # Wyoming default
+        self.channels = 1
+        self._info_sent = False
+
+    async def handle_event(self, event: Event) -> bool:
+        # Send Info event on first connection
+        if not self._info_sent:
+            await self._send_info()
+            self._info_sent = True
+
+        if Describe.is_type(event.type):
+            # Client requesting info
+            await self._send_info()
+            return True
+        if AudioStart.is_type(event.type):
+            # Start of audio stream
+            audio_start = AudioStart.from_event(event)
+            self.sample_rate = audio_start.rate
+            self.channels = audio_start.channels
+            self.audio_buffer.clear()
+
+        elif AudioChunk.is_type(event.type):
+            # Accumulate audio data
+            audio_chunk = AudioChunk.from_event(event)
+            self.audio_buffer.extend(audio_chunk.audio)
+
+        elif AudioStop.is_type(event.type):
+            # End of audio - transcribe
+            if not ASR_URL:
+                await self.write_event(Transcript(text="Error: ASR_URL not configured").event())
+                return True
+
+            try:
+                # Convert raw PCM to WAV
+                wav_bytes = self._pcm_to_wav(bytes(self.audio_buffer))
+
+                # Send to Speaches
+                files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
+                async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=2.0)) as client:
+                    response = await client.post(ASR_URL, files=files)
+                    response.raise_for_status()
+                    result = response.json()
+
+                # Send transcript back
+                text = result.get("text", "")
+                await self.write_event(Transcript(text=text).event())
+
+            except Exception as e:
+                await self.write_event(Transcript(text=f"Error: {str(e)}").event())
+
+            return True
+
+        return True
+
+    def _pcm_to_wav(self, pcm_data: bytes) -> bytes:
+        """Convert raw PCM to WAV format"""
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, 'wb') as wav_file:
+            wav_file.setnchannels(self.channels)
+            wav_file.setsampwidth(2)  # 16-bit
+            wav_file.setframerate(self.sample_rate)
+            wav_file.writeframes(pcm_data)
+        return wav_buffer.getvalue()
+
+    async def _send_info(self):
+        """Send Info event describing ASR capabilities"""
+        info = Info(
+            asr=[
+                AsrProgram(
+                    name="speaches-whisper",
+                    description="Faster Whisper STT via Speaches",
+                    attribution=Attribution(name="Speaches", url=""),
+                    installed=True,
+                    version="1.0.0",
+                    models=[
+                        AsrModel(
+                            name="base.en",
+                            description="Faster Whisper base.en (GPU)",
+                            attribution=Attribution(name="OpenAI Whisper", url=""),
+                            installed=True,
+                            version="1.0.0",
+                            languages=["en"],
+                        )
+                    ],
+                )
+            ],
+        )
+        await self.write_event(info.event())
+
+
+# Wyoming TTS Handler
+class SpeachesTTSHandler(AsyncEventHandler):
+    """Wyoming TTS handler that bridges to Speaches with streaming"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._info_sent = False
+
+    async def handle_event(self, event: Event) -> bool:
+        # Send Info event on first connection
+        if not self._info_sent:
+            await self._send_info()
+            self._info_sent = True
+
+        if Describe.is_type(event.type):
+            # Client requesting info
+            await self._send_info()
+            return True
+
+        if not Synthesize.is_type(event.type):
+            return True
+
+        synthesize = Synthesize.from_event(event)
+        text = synthesize.text
+        voice = synthesize.voice or "en_US-lessac-medium"
+
+        if not TTS_URL:
+            return False
+
+        try:
+            # Check fallback mode
+            async with _fallback_lock:
+                use_fallback = tts_fallback_enabled
+
+            if use_fallback and FALLBACK_TTS_URL:
+                # Use fallback TTS endpoint
+                await self._stream_from_url(FALLBACK_TTS_URL, text, voice)
+            else:
+                # Use Speaches streaming TTS
+                await self._stream_from_speaches(text, voice)
+
+        except Exception as e:
+            # Error handling - just close connection
+            pass
+
+        return True
+
+    async def _stream_from_speaches(self, text: str, voice: str):
+        """Stream TTS audio from Speaches"""
+        payload = {
+            "input": text,
+            "voice": voice,
+            "model": "tts-1",
+            "response_format": "pcm"
+        }
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=2.0)) as client:
+            async with client.stream("POST", TTS_URL, json=payload) as response:
+                response.raise_for_status()
+
+                # Send audio start
+                await self.write_event(
+                    AudioStart(rate=SAMPLE_RATE, width=2, channels=1).event()
+                )
+
+                # Stream audio chunks
+                async for chunk in response.aiter_bytes(CHUNK_SIZE):
+                    if chunk:
+                        await self.write_event(AudioChunk(audio=chunk, rate=SAMPLE_RATE, width=2, channels=1).event())
+
+                # Send audio stop
+                await self.write_event(AudioStop().event())
+
+    async def _stream_from_url(self, url: str, text: str, voice: str):
+        """Stream from fallback URL"""
+        await self._stream_from_speaches(text, voice)  # Same implementation
+
+    async def _send_info(self):
+        """Send Info event describing TTS capabilities"""
+        info = Info(
+            tts=[
+                TtsProgram(
+                    name="speaches-piper",
+                    description="Piper TTS via Speaches streaming",
+                    attribution=Attribution(name="Speaches", url=""),
+                    installed=True,
+                    version="1.0.0",
+                    voices=[
+                        TtsVoice(
+                            name="en_US-lessac-medium",
+                            description="Lessac medium voice (Piper)",
+                            attribution=Attribution(name="Piper TTS", url=""),
+                            installed=True,
+                            version="1.0.0",
+                            languages=["en-US"],
+                        )
+                    ],
+                )
+            ],
+        )
+        await self.write_event(info.event())
+
+
+# FastAPI app
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start Wyoming TCP servers on startup"""
+    global stt_server, tts_server
+
+    # STT Server
+    stt_server = AsyncServer.from_uri("tcp://0.0.0.0:10300")
+
+    # TTS Server
+    tts_server = AsyncServer.from_uri("tcp://0.0.0.0:10210")
+
+    # Start servers in background with handler factories
+    asyncio.create_task(stt_server.run(SpeachesSTTHandler))
+    asyncio.create_task(tts_server.run(SpeachesTTSHandler))
+
+    yield
+
+    # Cleanup (not reached in practice, but good form)
+    pass
+
+
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -40,6 +279,8 @@ async def healthz() -> dict:
         "fallback_tts_port": FALLBACK_TTS_PORT,
         "fallback_tts_url": FALLBACK_TTS_URL,
         "tts_fallback": fallback_enabled,
+        "wyoming_stt": "tcp://0.0.0.0:10300",
+        "wyoming_tts": "tcp://0.0.0.0:10210",
     }
 
 
@@ -63,6 +304,7 @@ async def set_config(payload: dict = Body(...)) -> dict:
     return {"tts_fallback": current}
 
 
+# Keep HTTP endpoints for debugging/testing
 @app.post("/wyoming/stt")
 async def wyoming_stt(
     audio: UploadFile,

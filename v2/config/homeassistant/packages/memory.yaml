@@ -38,6 +38,18 @@ sensor:
     unit_of_measurement: s
     timeout: 10
     scan_interval: 60
+  - platform: rest
+    name: Memory Additions Today
+    resource: http://letta-bridge:8010/metrics
+    value_template: >
+      {% set total = 0 %}
+      {% for line in value.split('\n') %}
+        {% if line.startswith('memory_additions_total') %}
+          {% set total = total + line.split(' ')[-1]|float(0) %}
+        {% endif %}
+      {% endfor %}
+      {{ total|round(0) }}
+    scan_interval: 60
 
 switch:
   - platform: rest

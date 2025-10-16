@@ -103,8 +103,8 @@ services:
       - FALLBACK_TTS_PORT=10200
       - FALLBACK_TTS_URL=${FALLBACK_TTS_URL:-}
     ports:
-      - "10300:10300"  # STT endpoint (Wyoming TCP)
-      - "10210:10210"  # TTS endpoint (Wyoming TCP)
+      - "10300:10300"  # Wyoming STT (TCP bridge to Speaches)
+      - "10210:10210"  # Wyoming TTS (TCP bridge to Speaches)
       - "8080:8080"    # HTTP healthcheck/config API
     depends_on:
       speaches:
@@ -209,7 +209,7 @@ services:
       - OLLAMA_TEXT_MODEL_FAST=hermes3:latest     # Fast/simple queries
       # VL model (GTX 1080 Ti)
       - OLLAMA_VL_URL=http://ollama-vl:11434
-      - OLLAMA_MODEL_VL=qwen2.5:3b                # VL model (update when VL-8B pulled)
+      - OLLAMA_MODEL_VL=qwen2.5vl:7b              # Qwen2.5-VL 7B vision-language model
       # Router configuration
       - VL_GPU_INDEX=1                            # GTX 1080 Ti index
       - VL_IDLE_UTIL_MAX=0.50                     # 50% 5s avg => idle
@@ -236,6 +236,8 @@ services:
       memory-embed: { condition: service_healthy }
     ports:
       - "8020:8020"
+    volumes:
+      - orch_state:/app/state
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8020/health"]
       interval: 30s
@@ -297,8 +299,9 @@ volumes:
     name: hassistant_v2_pgdata
   memembed_cache:
     name: hassistant_v2_memembed_cache  # Cache for embedding model
+  orch_state:
+    name: hassistant_v2_orch_state
 
-    
 
 # ---- Step 3 (Deferred): Vision/K80 VM integration ---------------------------
 # profiles:

@@ -35,3 +35,7 @@ cards:
       {% for item in queries[:5] %}
       - {{ item.query }} ({{ item.results }} hits)
       {% endfor %}
+  - type: entities
+    title: Daily Activity
+    entities:
+      - sensor.memory_additions_today

@@ -18,6 +18,14 @@ from prometheus_client import (
 
 from scoring import compute_usefulness
 
+try:
+    import pynvml
+
+    pynvml.nvmlInit()
+    _NVML_AVAILABLE = True
+except Exception:
+    _NVML_AVAILABLE = False
+
 ORCH = os.getenv("ORCHESTRATOR_URL", "http://orchestrator:8020")
 VL_GATEWAY = os.getenv("VL_GATEWAY_URL", "http://orchestrator:8020")
 ESCL_ENABLED = os.getenv("VISION_ESCALATE_VL", "1") == "1"
@@ -32,9 +40,60 @@ OCR_LAT = Histogram("vision_k80_ocr_latency_ms", "K80 preproc/ocr latency (ms)")
 LOCK_G = Gauge("vision_lock", "1 if lock held else 0")
 QUEUE_G = Gauge("vision_pending_jobs", "pending escalations")
 HEALTH_G = Gauge("vision_health", "1 if healthy")
+CONFIG_G = Gauge("vision_config_state", "configuration flags", ["key"])
+SKIP_TOTAL = Counter("vision_events_skipped_total", "events skipped due to configuration", ["reason"])
+GPU_UTIL_G = Gauge("vision_gpu_util_percent", "GPU utilization percent", ["index"])
+GPU_MEM_FREE_G = Gauge("vision_gpu_mem_free_gb", "GPU free memory (GB)", ["index"])
 
 pending_jobs = 0
 lock_held = False
+total_events = 0
+total_escalations = 0
+
+config: Dict[str, Any] = {
+    "vision_on": True,
+    "screen_watch_on": True,
+    "threshold": THRESH,
+    "max_frames": MAX_FRAMES,
+}
+
+
+def _update_config_metrics() -> None:
+    CONFIG_G.labels("vision_on").set(1.0 if config.get("vision_on", True) else 0.0)
+    CONFIG_G.labels("screen_watch_on").set(1.0 if config.get("screen_watch_on", True) else 0.0)
+    CONFIG_G.labels("threshold").set(float(config.get("threshold", THRESH)))
+    CONFIG_G.labels("max_frames").set(float(config.get("max_frames", MAX_FRAMES)))
+
+
+def _gpu_stats() -> Dict[str, Any]:
+    if not _NVML_AVAILABLE:
+        return {"gpus": []}
+
+    gpus: List[Dict[str, Any]] = []
+    try:
+        count = pynvml.nvmlDeviceGetCount()
+        for index in range(count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(index)
+            util = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+            mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            free_gb = mem_info.free / (1024**3)
+            total_gb = mem_info.total / (1024**3)
+            gpus.append(
+                {
+                    "index": index,
+                    "util": float(util),
+                    "mem_free_gb": round(free_gb, 2),
+                    "mem_total_gb": round(total_gb, 2),
+                }
+            )
+            GPU_UTIL_G.labels(index=str(index)).set(util)
+            GPU_MEM_FREE_G.labels(index=str(index)).set(free_gb)
+    except Exception:
+        return {"gpus": []}
+
+    return {"gpus": gpus}
+
+_update_config_metrics()
 
 app = FastAPI(title="vision-router", version="0.1.0")
 logger = logging.getLogger("vision-router")
@@ -43,12 +102,49 @@ logging.basicConfig(level=logging.INFO)
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
-    return {"ok": True, "escalate": ESCL_ENABLED, "threshold": THRESH}
+    return {
+        "ok": True,
+        "escalate": ESCL_ENABLED,
+        "threshold": config.get("threshold", THRESH),
+        "vision_on": config.get("vision_on", True),
+    }
 
 
 @app.get("/metrics")
 def metrics() -> PlainTextResponse:
     return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.get("/config")
+def get_config() -> Dict[str, Any]:
+    return config
+
+
+@app.post("/config")
+def set_config(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    if "vision_on" in payload:
+        config["vision_on"] = bool(payload["vision_on"])
+    if "screen_watch_on" in payload:
+        config["screen_watch_on"] = bool(payload["screen_watch_on"])
+    if "threshold" in payload:
+        config["threshold"] = float(payload["threshold"])
+    if "max_frames" in payload:
+        config["max_frames"] = max(1, int(payload["max_frames"]))
+    _update_config_metrics()
+    logger.info("Updated config: %s", config)
+    return config
+
+
+@app.get("/stats")
+def stats() -> Dict[str, Any]:
+    return {
+        "queue_depth": max(0, pending_jobs),
+        "lock_enabled": bool(lock_held),
+        "events_total": total_events,
+        "escalations_total": total_escalations,
+        "config": config,
+        **_gpu_stats(),
+    }
 
 
 @app.post("/lock")
@@ -92,14 +188,14 @@ async def _escalate_to_vl(bundle: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": str(exc)}
 
 
-def _build_vl_bundle(event: Dict[str, Any]) -> Dict[str, Any]:
+def _build_vl_bundle(event: Dict[str, Any], top_k: int) -> Dict[str, Any]:
     frames: List[Dict[str, Any]] = event.get("frames") or []
     ranked = sorted(
         frames,
         key=lambda frame: len(((frame.get("ocr") or {}).get("text") or "")),
         reverse=True,
     )
-    top_frames = ranked[:MAX_FRAMES]
+    top_frames = ranked[: max(1, top_k)]
     return {
         "source": event.get("source"),
         "frames": [{"url": frame.get("url"), "ocr": (frame.get("ocr") or {})} for frame in top_frames],
@@ -116,12 +212,28 @@ def _build_vl_bundle(event: Dict[str, Any]) -> Dict[str, Any]:
 
 @app.post("/events")
 async def ingest_event(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
-    global pending_jobs, lock_held
+    global pending_jobs, lock_held, total_events, total_escalations
     source = payload.get("source", "unknown")
+
+    if not config.get("vision_on", True):
+        EVENTS_TOTAL.labels(source).inc()
+        SKIP_TOTAL.labels(reason="vision_off").inc()
+        total_events += 1
+        return JSONResponse(
+            {"id": str(uuid.uuid4()), "skipped": True, "reason": "vision_off"}
+        )
+
     EVENTS_TOTAL.labels(source).inc()
+    total_events += 1
 
     score = compute_usefulness(payload)
-    should_escalate = ESCL_ENABLED and score >= THRESH
+    threshold = float(config.get("threshold", THRESH))
+    should_escalate = ESCL_ENABLED and score >= threshold
+
+    if not config.get("screen_watch_on", True) and source.lower() == "screen":
+        if should_escalate:
+            SKIP_TOTAL.labels(reason="screen_disabled").inc()
+        should_escalate = False
 
     event_id = str(uuid.uuid4())
     unified = {
@@ -147,8 +259,10 @@ async def ingest_event(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
         pending_jobs += 1
         QUEUE_G.set(pending_jobs)
         ESC_TOTAL.labels(reason="useful").inc()
-        bundle = _build_vl_bundle(payload)
+        top_k = int(config.get("max_frames", MAX_FRAMES))
+        bundle = _build_vl_bundle(payload, top_k)
         result = await _escalate_to_vl(bundle)
+        total_escalations += 1
         pending_jobs = max(0, pending_jobs - 1)
         QUEUE_G.set(pending_jobs)
         if LOCK_ON_ESCALATE and lock_held:
@@ -163,6 +277,7 @@ async def ingest_event(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
 @app.on_event("startup")
 async def on_start() -> None:
     HEALTH_G.set(1.0)
+    _update_config_metrics()
 
 
 @app.on_event("shutdown")

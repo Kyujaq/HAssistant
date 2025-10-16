@@ -39,7 +39,7 @@ Everything should be surfaced and controllable through **Home Assistant** in add
 * **Inventory**: each item either as (a) HA **entity per item** with attributes, or (b) a single **JSON attribute** on `sensor.pantry_inventory`.
   *Recommended*: hybrid → top-50 items (entities) + master JSON sensor for long tail.
   **My notes / intent:** [ ]
-* **Queues**: `sensor.vision_queue_depth`, `sensor.vl_requests_today`, `sensor.memory_additions_today`.
+* **Queues**: `sensor.vision_router_queue_depth`, `sensor.vl_requests_today`, `sensor.memory_additions_today`.
 * **Switches**: `switch.privacy_pause`, `switch.vision_on`, `switch.screen_watch_on`.
 * **Selects**: `select.energy_band` (low / medium / high), `select.focus_mode` (deep / admin / errands).
 * **Calendars**: `calendar.work_mirror`, `calendar.personal`, `calendar.menu_plan`.
@@ -403,7 +403,7 @@ Return **the full Compose YAML** and **the three files** exactly as code blocks 
 > - [ ] Thresholds: `VL_EVENT_THRESH`, cooldowns, dedupe window
 > - [ ] Qwen2.5-VL on crops only; return normalized schema
 > - [ ] HA Review Card: Approve/Reject/Edit
-> - [ ] Entities: `sensor.vision_queue_depth`, etc.
+> - [ ] Entities: `sensor.vision_router_queue_depth`, etc.
 >
 > **Acceptance**
 > - [ ] Showing 8 grocery items → review card → approved → inventory updated

@@ -1,0 +1,49 @@
+title: Vision Signals
+path: vision-signals
+icon: mdi:radar
+cards:
+  - type: entities
+    title: Controls
+    entities:
+      - switch.vision_on
+      - switch.screen_watch_on
+      - input_number.vision_threshold
+      - input_number.vision_max_frames
+
+  - type: gauge
+    name: Queue Depth
+    entity: sensor.vision_queue_depth
+    min: 0
+    max: 20
+    severity:
+      green: 0
+      yellow: 5
+      red: 10
+
+  - type: entities
+    title: GPU 0
+    entities:
+      - sensor.vision_gpu0_util
+      - sensor.vision_gpu0_mem_free_gb
+
+  - type: entities
+    title: GPU 1
+    entities:
+      - sensor.vision_gpu1_util
+      - sensor.vision_gpu1_mem_free_gb
+
+  - type: history-graph
+    title: Queue & Util (last 6h)
+    hours_to_show: 6
+    refresh_interval: 30
+    entities:
+      - sensor.vision_queue_depth
+      - sensor.vision_gpu0_util
+      - sensor.vision_gpu1_util
+
+  - type: markdown
+    title: Notes
+    content: >
+      - **Threshold** controls when pre-filtered events escalate to the VL model.
+      - **Max Frames** caps the bundle size sent to VL.
+      - Turn **Screen Watch** off to ignore desktop/screen sources.
