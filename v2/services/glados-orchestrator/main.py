@@ -6,8 +6,10 @@ Step 2.6: VL Router - GPU-aware model selection
 import os
 import uuid
 import time
+import json
+import hashlib
 import logging
-from typing import Dict
+from typing import Any, Dict, List
 from collections import defaultdict, deque
 
 from fastapi import FastAPI, Body
@@ -58,9 +60,17 @@ VL_IDLE_G = Gauge("orchestrator_vl_idle", "1 if VL idle else 0")
 VL_UTIL_G = Gauge("orchestrator_vl_util", "VL GPU utilization (5s avg)")
 VL_MEM_FREE_G = Gauge("orchestrator_vl_mem_free_gb", "VL GPU free VRAM (GB)")
 
+# Prometheus metrics - Vision ingest
+VISION_EVENTS_TOTAL = Counter(
+    "vision_events_ingested_total",
+    "Vision events received from K80 router",
+    ["source", "kind"],
+)
+
 # Router state
 vl_queue = deque(maxlen=64)  # Lightweight queue tracker
 conv_sticky_until = defaultdict(float)  # conv_id -> unix timestamp for VL stickiness
+VISION_LOCK = False
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -105,6 +115,61 @@ async def vl_toggle(payload: dict = Body(...)) -> JSONResponse:
     return JSONResponse({"enabled": VL_TEXT_ENABLED})
 
 
+@app.get("/router/vision_lock")
+async def vision_lock_state() -> JSONResponse:
+    """Return current vision lock state (used by HA and the K80 router)."""
+    return JSONResponse({"enabled": bool(VISION_LOCK)})
+
+
+@app.post("/router/vision_lock")
+async def vision_lock_toggle(payload: dict = Body(...)) -> JSONResponse:
+    """
+    Set or clear the vision lock flag.
+
+    The K80 router flips this while escalating to VL so text routing can back off.
+    """
+    global VISION_LOCK
+    enabled = bool(payload.get("enabled", True))
+    VISION_LOCK = enabled
+    logger.info("Vision lock %s", "enabled" if enabled else "cleared")
+    return JSONResponse({"enabled": VISION_LOCK})
+
+
+@app.post("/vision/event")
+async def vision_event(event: Dict[str, Any] = Body(...)) -> JSONResponse:
+    """
+    Receive unified vision events from the K80 router and persist compact memories.
+    """
+    source = (event.get("source") or "unknown").lower()
+    vl_payload = event.get("vl")
+    has_summary = isinstance(vl_payload, dict) and bool(vl_payload.get("summary"))
+    memory_kind = "vision_event"
+    if source == "screen":
+        memory_kind = "screen_ocr"
+    if has_summary:
+        memory_kind = "screen_summary"
+
+    VISION_EVENTS_TOTAL.labels(source=source, kind=memory_kind).inc()
+
+    turn_id = event.get("id") or str(uuid.uuid4())
+    text_blob = _format_vision_memory(event)
+
+    if text_blob:
+        bg.spawn(
+            mem.add(
+                text=text_blob,
+                turn_id=turn_id,
+                role="system",
+                ctx_hits=0,
+                kind=memory_kind,
+                source="vision-router",
+            ),
+            name=f"vision_event_{turn_id[:8]}",
+        )
+
+    return JSONResponse({"ok": True})
+
+
 # ===== Routing Helpers =====
 
 def vl_idle() -> bool:
@@ -119,6 +184,8 @@ def vl_idle() -> bool:
     VL_MEM_FREE_G.set(mem_free)
 
     idle = (util <= VL_IDLE_UTIL_MAX) and (mem_free >= VL_MIN_MEM_FREE_GB) and (len(vl_queue) == 0)
+    if VISION_LOCK:
+        idle = False
     VL_IDLE_G.set(1 if idle else 0)
     VL_QUEUE_G.set(len(vl_queue))
 
@@ -168,6 +235,78 @@ async def call_ollama_model(base_url: str, model: str, prompt: str, max_tokens: 
         response.raise_for_status()
         data = response.json()
         return data.get("response") or data.get("text") or ""
+
+
+def _format_vision_memory(event: Dict[str, Any]) -> str:
+    """Build a compact textual representation of a vision event for memory storage."""
+    if not isinstance(event, dict):
+        return ""
+
+    source = event.get("source", "unknown")
+    score = event.get("score")
+    tags: List[str] = []
+    detections: List[Dict[str, Any]] = []
+
+    k80_payload = event.get("k80") or {}
+    if isinstance(k80_payload, dict):
+        tags = list(k80_payload.get("tags") or [])
+        detections = list(k80_payload.get("detections") or [])
+
+    # Fall back to top-level tags/detections if present
+    if not tags:
+        tags = list(event.get("tags") or [])
+    if not detections:
+        detections = list(event.get("detections") or [])
+
+    headline = f"[Vision] source={source}"
+    if isinstance(score, (int, float)):
+        headline += f" score={score:.2f}"
+    elif score is not None:
+        headline += f" score={score}"
+
+    lines = [headline]
+    if tags:
+        lines.append("tags: " + ", ".join(str(tag) for tag in tags[:8]))
+
+    det_labels = sorted(
+        {str(det.get("label")) for det in detections if isinstance(det, dict) and det.get("label")}
+    )
+    if det_labels:
+        lines.append("detections: " + ", ".join(det_labels[:6]))
+
+    vl_payload = event.get("vl")
+    summary_text = None
+    bullet_points: List[str] = []
+    if isinstance(vl_payload, dict):
+        summary_text = vl_payload.get("summary") or vl_payload.get("text")
+        raw_bullets = vl_payload.get("bullets") or []
+        bullet_points = [str(item) for item in raw_bullets if isinstance(item, str)]
+
+    if summary_text:
+        lines.append("summary: " + summary_text)
+    if bullet_points:
+        lines.extend(f"- {bullet}" for bullet in bullet_points[:5])
+
+    if not summary_text:
+        frames: List[Dict[str, Any]] = []
+        if isinstance(k80_payload, dict):
+            frames = list(k80_payload.get("frames") or [])
+        if not frames:
+            frames = list(event.get("frames") or [])
+
+        for frame in frames:
+            if not isinstance(frame, dict):
+                continue
+            ocr = frame.get("ocr") or {}
+            if not isinstance(ocr, dict):
+                continue
+            text = ocr.get("text")
+            if text:
+                lines.append("ocr: " + str(text)[:300])
+                break
+
+    text_blob = "\n".join(lines).strip()
+    return text_blob[:4000]
 
 
 async def route_and_generate(conv_id: str, prompt: str, user_text: str) -> str:
@@ -365,6 +504,109 @@ Assistant:"""
         "memory_hits": len(hits),
         "ctx_chars": len(ctx)
     })
+
+
+@app.post("/v1/chat/completions")
+async def openai_chat_completions(payload: Dict = Body(...)) -> JSONResponse:
+    """
+    OpenAI-compatible chat completions endpoint for Home Assistant integration.
+
+    Step 2.7: Assist ↔ Orchestrator Bridge
+
+    Accepts OpenAI format and forwards to /chat endpoint with memory integration.
+
+    Request body (OpenAI format):
+        - model: Model name (ignored, we use intelligent routing)
+        - messages: Array of {role, content} objects
+        - stream: Boolean (currently only supports false)
+
+    Returns OpenAI format:
+        - id: Turn ID
+        - object: "chat.completion"
+        - created: Unix timestamp
+        - model: Model used
+        - choices: Array with message and finish_reason
+    """
+    # Extract messages
+    messages = payload.get("messages", [])
+    if not messages:
+        return JSONResponse(
+            {"error": {"message": "messages required", "type": "invalid_request_error"}},
+            status_code=400
+        )
+
+    # Find last user message
+    user_message = None
+    for msg in reversed(messages):
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            user_message = msg.get("content", "").strip()
+            break
+
+    if not user_message:
+        return JSONResponse(
+            {"error": {"message": "No user message found", "type": "invalid_request_error"}},
+            status_code=400
+        )
+
+    # Extract conversation_id from messages (use first message's content hash as stable ID)
+    # This ensures multi-turn conversations maintain VL stickiness
+    conv_id = None
+    if len(messages) > 1:
+        # Use hash of first user message as stable conversation ID
+        first_user_msg = next((m.get("content") for m in messages if m.get("role") == "user"), None)
+        if first_user_msg:
+            conv_id = hashlib.sha256(first_user_msg.encode()).hexdigest()[:16]
+
+    # Call internal /chat endpoint
+    chat_payload = {
+        "input": user_message,
+        "conversation_id": conv_id
+    }
+
+    # Check for system message override
+    system_msg = next((m.get("content") for m in messages if m.get("role") == "system"), None)
+    if system_msg:
+        chat_payload["system_prompt"] = system_msg
+
+    # Make internal call to /chat
+    result = await chat(chat_payload)
+    result_data = result.body.decode() if hasattr(result, 'body') else '{}'
+
+    # Parse result
+    try:
+        chat_response = json.loads(result_data)
+    except:
+        chat_response = {"reply": "Error processing response"}
+
+    reply_text = chat_response.get("reply", "")
+    turn_id = chat_response.get("turn_id", str(uuid.uuid4()))
+
+    # Build OpenAI-compatible response
+    openai_response = {
+        "id": f"chatcmpl-{turn_id[:8]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": payload.get("model", "glados-orchestrator"),
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": reply_text
+                },
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": len(user_message.split()),
+            "completion_tokens": len(reply_text.split()),
+            "total_tokens": len(user_message.split()) + len(reply_text.split())
+        }
+    }
+
+    logger.info(f"OpenAI API call completed: turn_id={turn_id}, memory_hits={chat_response.get('memory_hits', 0)}")
+
+    return JSONResponse(openai_response)
 
 
 @app.on_event("shutdown")
