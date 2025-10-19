@@ -30,6 +30,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcublas11 \
     libcublaslt11 \
     libcudnn8 \
+    libcublas11 \
+    libcublaslt11 \
+    libcufft10 \
+    libcurand10 \
+    libcusolver11 \
+    libcusparse11 \
+    cuda-cudart-11-8 \
     curl \
     tini \
     && rm -rf /var/lib/apt/lists/*
