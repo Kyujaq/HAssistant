@@ -1,0 +1,42 @@
+select:
+  - platform: template
+    name: Energy Band
+    value_template: "{{ state_attr('sensor.orchestrator_config', 'energy_band') | default('medium') }}"
+    options:
+      - low
+      - medium
+      - high
+    select_option:
+      service: rest_command.set_orch_config
+      data:
+        payload: >
+          {"energy_band":"{{ option }}"}
+  - platform: template
+    name: Focus Mode
+    value_template: "{{ state_attr('sensor.orchestrator_config', 'focus_mode') | default('admin') }}"
+    options:
+      - deep
+      - admin
+      - errands
+    select_option:
+      service: rest_command.set_orch_config
+      data:
+        payload: >
+          {"focus_mode":"{{ option }}"}
+
+rest_command:
+  set_orch_config:
+    url: http://orchestrator:8020/config
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload: "{{ payload }}"
+
+lovelace:
+  dashboards:
+    today:
+      mode: yaml
+      filename: today-view.yaml
+      title: Today
+      icon: mdi:calendar-today
+      show_in_sidebar: true

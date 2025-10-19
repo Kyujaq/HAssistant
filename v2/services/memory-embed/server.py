@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 from typing import List
@@ -26,6 +27,14 @@ LAT = Histogram("memembed_latency_seconds", "latency", ["route"])
 app = FastAPI(title="memory-embed")
 
 
+async def _encode_texts(texts: List[str]) -> List[List[float]]:
+    """Encode texts using the transformer in a worker thread."""
+    def _run() -> List[List[float]]:
+        return model.encode(list(texts), normalize_embeddings=True).tolist()
+
+    return await asyncio.to_thread(_run)
+
+
 @app.get("/health")
 async def health() -> JSONResponse:
     return JSONResponse({"ok": True, "model": MODEL_NAME})
@@ -45,7 +54,7 @@ async def embed(payload: dict = Body(...)) -> JSONResponse:
     if not texts:
         raise HTTPException(status_code=400, detail="texts[] required")
 
-    vectors = model.encode(texts, normalize_embeddings=True).tolist()
+    vectors = await _encode_texts(texts)
     LAT.labels("embed").observe(time.time() - start)
     return JSONResponse({"vectors": vectors})
 
@@ -68,7 +77,7 @@ async def upsert(payload: dict = Body(...)) -> JSONResponse:
 
     memory_id = UUID(raw_id) if raw_id else uuid4()
 
-    vector = model.encode([text], normalize_embeddings=True)[0].tolist()
+    vector = (await _encode_texts([text]))[0]
 
     async with db.get_conn() as conn:
         await conn.execute(
@@ -102,7 +111,7 @@ async def search(payload: dict = Body(...)) -> JSONResponse:
         raise HTTPException(status_code=400, detail="q required")
     top_k = int(payload.get("top_k", DEFAULT_TOP_K))
 
-    query_vector = model.encode([query_text], normalize_embeddings=True)[0].tolist()
+    query_vector = (await _encode_texts([query_text]))[0]
 
     async with db.get_conn() as conn:
         cursor = await conn.execute(

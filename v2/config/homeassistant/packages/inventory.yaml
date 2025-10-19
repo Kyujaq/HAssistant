@@ -1,0 +1,152 @@
+# Inventory Package
+# Step 2.x: Hybrid inventory system
+# Master JSON sensor + top-50 item helpers for easy voice control
+
+homeassistant:
+  customize:
+    sensor.pantry_inventory:
+      friendly_name: "Pantry Inventory"
+      icon: mdi:fridge
+
+# Master JSON sensor (backed by orchestrator)
+sensor:
+  - platform: rest
+    name: Pantry Inventory
+    resource: http://orchestrator:8020/inventory/snapshot
+    value_template: "{{ value_json.count | default(0) }}"
+    json_attributes:
+      - items
+      - updated_at
+    scan_interval: 60
+    timeout: 10
+
+# Top-50 item helpers (example for 5 items; extend via script)
+# These allow easy voice control: "Set milk to 2" or dashboard sliders
+input_number:
+  inv_milk_qty:
+    name: Milk (qty)
+    min: 0
+    max: 10
+    step: 1
+    icon: mdi:cup
+  inv_eggs_qty:
+    name: Eggs (qty)
+    min: 0
+    max: 24
+    step: 1
+    icon: mdi:egg
+  inv_bread_qty:
+    name: Bread (qty)
+    min: 0
+    max: 5
+    step: 1
+    icon: mdi:baguette
+  inv_butter_qty:
+    name: Butter (qty)
+    min: 0
+    max: 5
+    step: 0.5
+    icon: mdi:butter
+  inv_cheese_qty:
+    name: Cheese (qty)
+    min: 0
+    max: 10
+    step: 0.5
+    icon: mdi:cheese
+
+# REST commands to update inventory in backend
+rest_command:
+  inventory_upsert:
+    url: http://orchestrator:8020/inventory/upsert
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload: >
+      {{ payload | tojson }}
+    timeout: 15
+
+  inventory_sync_from_json:
+    url: http://orchestrator:8020/inventory/sync_json
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload: >
+      {"items": {{ state_attr('sensor.pantry_inventory','items') | tojson }}}
+    timeout: 15
+
+# Automations to sync input_number changes to backend
+automation:
+  - id: inventory_sync_milk
+    alias: Inventory - Sync Milk
+    trigger:
+      - platform: state
+        entity_id: input_number.inv_milk_qty
+    action:
+      - service: rest_command.inventory_upsert
+        data:
+          payload:
+            name: "milk"
+            quantity: "{{ states('input_number.inv_milk_qty') | float }}"
+            unit: "count"
+
+  - id: inventory_sync_eggs
+    alias: Inventory - Sync Eggs
+    trigger:
+      - platform: state
+        entity_id: input_number.inv_eggs_qty
+    action:
+      - service: rest_command.inventory_upsert
+        data:
+          payload:
+            name: "eggs"
+            quantity: "{{ states('input_number.inv_eggs_qty') | float }}"
+            unit: "count"
+
+  - id: inventory_sync_bread
+    alias: Inventory - Sync Bread
+    trigger:
+      - platform: state
+        entity_id: input_number.inv_bread_qty
+    action:
+      - service: rest_command.inventory_upsert
+        data:
+          payload:
+            name: "bread"
+            quantity: "{{ states('input_number.inv_bread_qty') | float }}"
+            unit: "loaves"
+
+  - id: inventory_sync_butter
+    alias: Inventory - Sync Butter
+    trigger:
+      - platform: state
+        entity_id: input_number.inv_butter_qty
+    action:
+      - service: rest_command.inventory_upsert
+        data:
+          payload:
+            name: "butter"
+            quantity: "{{ states('input_number.inv_butter_qty') | float }}"
+            unit: "sticks"
+
+  - id: inventory_sync_cheese
+    alias: Inventory - Sync Cheese
+    trigger:
+      - platform: state
+        entity_id: input_number.inv_cheese_qty
+    action:
+      - service: rest_command.inventory_upsert
+        data:
+          payload:
+            name: "cheese"
+            quantity: "{{ states('input_number.inv_cheese_qty') | float }}"
+            unit: "blocks"
+
+# Register dashboard
+lovelace:
+  dashboards:
+    inventory:
+      mode: yaml
+      filename: inventory-view.yaml
+      title: Inventory
+      icon: mdi:fridge
+      show_in_sidebar: true

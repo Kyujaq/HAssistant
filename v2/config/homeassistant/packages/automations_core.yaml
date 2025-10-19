@@ -1,0 +1,114 @@
+sensor:
+  - platform: rest
+    name: Last Orchestrator Reply
+    resource: http://orchestrator:8020/last_reply
+    value_template: "{{ value_json.text | default('') }}"
+    json_attributes:
+      - turn_id
+      - when
+    scan_interval: 5
+
+automation:
+  - id: glados_eod_checkin
+    alias: GLaDOS - End of Day Check-in
+    trigger:
+      - platform: time
+        at: "21:30:00"
+    condition: []
+    action:
+      - service: rest_command.orch_chat
+        data:
+          payload: >
+            {"input":"Daily check-in: What did we accomplish and what was blocked? Summarize in 5 bullets and list top blockers for tomorrow.","system":"assistant_run:eod_checkin"}
+      - delay: "00:00:03"
+      - service: homeassistant.update_entity
+        target:
+          entity_id: sensor.last_orchestrator_reply
+      - service: persistent_notification.create
+        data:
+          title: "GLaDOS - EOD Summary"
+          message: "{{ states('sensor.last_orchestrator_reply') | default('No reply') }}"
+
+  - id: glados_morning_brief
+    alias: GLaDOS - Morning Brief
+    trigger:
+      - platform: time
+        at: "07:30:00"
+    action:
+      - service: rest_command.orch_chat
+        data:
+          payload: >
+            {"input":"Morning brief: energy band check, today's plan, and top 3 must-dos. Keep under 120 words.","system":"assistant_run:morning_brief"}
+
+  - id: inventory_autosync_top_items
+    alias: Inventory - Autosync Top Items
+    mode: queued
+    trigger:
+      - platform: state
+        entity_id:
+          - input_number.inv_milk_qty
+          - input_number.inv_eggs_qty
+          - input_number.inv_bread_qty
+    condition:
+      - condition: template
+        value_template: "{{ trigger.to_state.state not in [''unknown'', ''unavailable''] }}"
+    action:
+      - variables:
+          friendly: "{{ trigger.to_state.attributes.friendly_name }}"
+          qty: "{{ trigger.to_state.state | float(0) }}"
+      - service: rest_command.inventory_upsert
+        data:
+          payload:
+            name: "{{ friendly | replace(' (qty)', '') }}"
+            quantity: "{{ qty }}"
+      - delay: "00:00:02"
+      - service: homeassistant.update_entity
+        target:
+          entity_id: sensor.pantry_inventory
+
+  - id: vision_to_inventory_review
+    alias: Vision -> Inventory Review
+    trigger:
+      - platform: event
+        event_type: vision_router.grocery_detected
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "Inventory change detected"
+          message: >
+            Review in Inventory dashboard. Detected: {{ trigger.event.data.items | tojson }}
+
+  - id: work_mirror_personal
+    alias: Work -> Personal Calendar Mirror
+    trigger:
+      - platform: calendar
+        entity_id: calendar.work_mirror
+        event: start
+    action:
+      - service: rest_command.orch_mirror_event
+        data:
+          payload: >
+            {"summary":"{{ trigger.calendar_event.summary }}","start":"{{ trigger.calendar_event.start }}","end":"{{ trigger.calendar_event.end }}"}
+
+rest_command:
+  orch_chat:
+    url: http://orchestrator:8020/chat
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload: "{{ payload }}"
+  orch_mirror_event:
+    url: http://orchestrator:8020/calendar/mirror
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload: "{{ payload }}"
+
+lovelace:
+  dashboards:
+    night_crew:
+      mode: yaml
+      filename: night-crew-view.yaml
+      title: Night Crew
+      icon: mdi:weather-night
+      show_in_sidebar: true

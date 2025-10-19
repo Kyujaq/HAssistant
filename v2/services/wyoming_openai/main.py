@@ -1,5 +1,6 @@
 import asyncio
 import io
+import logging
 import os
 import struct
 import wave
@@ -16,6 +17,10 @@ from wyoming.event import Event
 from wyoming.info import AsrModel, AsrProgram, Attribution, Describe, Info, TtsProgram, TtsVoice
 from wyoming.tts import Synthesize
 from wyoming.server import AsyncEventHandler, AsyncServer
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Configuration
 ASR_URL = os.getenv("ASR_URL", "")
@@ -48,11 +53,13 @@ class SpeachesSTTHandler(AsyncEventHandler):
     async def handle_event(self, event: Event) -> bool:
         # Send Info event on first connection
         if not self._info_sent:
+            logger.info("[STT] New Wyoming STT connection")
             await self._send_info()
             self._info_sent = True
 
         if Describe.is_type(event.type):
             # Client requesting info
+            logger.info("[STT] Client requesting info")
             await self._send_info()
             return True
         if AudioStart.is_type(event.type):
@@ -61,21 +68,26 @@ class SpeachesSTTHandler(AsyncEventHandler):
             self.sample_rate = audio_start.rate
             self.channels = audio_start.channels
             self.audio_buffer.clear()
+            logger.info(f"[STT] Audio start: {self.sample_rate}Hz, {self.channels}ch")
 
         elif AudioChunk.is_type(event.type):
             # Accumulate audio data
             audio_chunk = AudioChunk.from_event(event)
             self.audio_buffer.extend(audio_chunk.audio)
+            logger.debug(f"[STT] Received audio chunk: {len(audio_chunk.audio)} bytes")
 
         elif AudioStop.is_type(event.type):
             # End of audio - transcribe
+            logger.info(f"[STT] Audio stop - buffer size: {len(self.audio_buffer)} bytes")
             if not ASR_URL:
+                logger.error("[STT] ASR_URL not configured")
                 await self.write_event(Transcript(text="Error: ASR_URL not configured").event())
                 return True
 
             try:
                 # Convert raw PCM to WAV
                 wav_bytes = self._pcm_to_wav(bytes(self.audio_buffer))
+                logger.info(f"[STT] Sending {len(wav_bytes)} bytes to {ASR_URL}")
 
                 # Send to Speaches
                 files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
@@ -86,9 +98,11 @@ class SpeachesSTTHandler(AsyncEventHandler):
 
                 # Send transcript back
                 text = result.get("text", "")
+                logger.info(f"[STT] Transcription result: '{text}'")
                 await self.write_event(Transcript(text=text).event())
 
             except Exception as e:
+                logger.error(f"[STT] Transcription error: {e}", exc_info=True)
                 await self.write_event(Transcript(text=f"Error: {str(e)}").event())
 
             return True
@@ -142,11 +156,13 @@ class SpeachesTTSHandler(AsyncEventHandler):
     async def handle_event(self, event: Event) -> bool:
         # Send Info event on first connection
         if not self._info_sent:
+            logger.info("[TTS] New Wyoming TTS connection")
             await self._send_info()
             self._info_sent = True
 
         if Describe.is_type(event.type):
             # Client requesting info
+            logger.info("[TTS] Client requesting info")
             await self._send_info()
             return True
 
@@ -156,8 +172,10 @@ class SpeachesTTSHandler(AsyncEventHandler):
         synthesize = Synthesize.from_event(event)
         text = synthesize.text
         voice = synthesize.voice or "en_US-lessac-medium"
+        logger.info(f"[TTS] Synthesize request: '{text[:50]}...' voice={voice}")
 
         if not TTS_URL:
+            logger.error("[TTS] TTS_URL not configured")
             return False
 
         try:
@@ -167,46 +185,64 @@ class SpeachesTTSHandler(AsyncEventHandler):
 
             if use_fallback and FALLBACK_TTS_URL:
                 # Use fallback TTS endpoint
+                logger.info(f"[TTS] Using fallback TTS: {FALLBACK_TTS_URL}")
                 await self._stream_from_url(FALLBACK_TTS_URL, text, voice)
             else:
                 # Use Speaches streaming TTS
+                logger.info(f"[TTS] Using Speaches TTS: {TTS_URL}")
                 await self._stream_from_speaches(text, voice)
+            logger.info("[TTS] Synthesis complete")
 
         except Exception as e:
             # Error handling - just close connection
+            logger.error(f"[TTS] Synthesis error: {e}", exc_info=True)
             pass
 
         return True
 
-    async def _stream_from_speaches(self, text: str, voice: str):
-        """Stream TTS audio from Speaches"""
+    async def _stream_from_http_endpoint(self, url: str, text: str, voice: str) -> None:
+        """Stream PCM audio from an HTTP TTS endpoint."""
         payload = {
             "input": text,
-            "voice": voice,
-            "model": "tts-1",
-            "response_format": "pcm"
+            "response_format": "pcm",
         }
+        if voice:
+            payload["voice"] = voice
+        # Some providers expect a model hint; Speaches ignores but keep for compatibility
+        payload.setdefault("model", "tts-1")
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=2.0)) as client:
-            async with client.stream("POST", TTS_URL, json=payload) as response:
+        timeout = httpx.Timeout(90.0, connect=2.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream("POST", url, json=payload) as response:
                 response.raise_for_status()
 
-                # Send audio start
+                sample_rate = SAMPLE_RATE
+                header_rate = response.headers.get("X-Sample-Rate") or response.headers.get("x-sample-rate")
+                if header_rate:
+                    try:
+                        sample_rate = int(header_rate)
+                    except ValueError:
+                        sample_rate = SAMPLE_RATE
+
                 await self.write_event(
-                    AudioStart(rate=SAMPLE_RATE, width=2, channels=1).event()
+                    AudioStart(rate=sample_rate, width=2, channels=1).event()
                 )
 
-                # Stream audio chunks
                 async for chunk in response.aiter_bytes(CHUNK_SIZE):
                     if chunk:
-                        await self.write_event(AudioChunk(audio=chunk, rate=SAMPLE_RATE, width=2, channels=1).event())
+                        await self.write_event(
+                            AudioChunk(audio=chunk, rate=sample_rate, width=2, channels=1).event()
+                        )
 
-                # Send audio stop
                 await self.write_event(AudioStop().event())
+
+    async def _stream_from_speaches(self, text: str, voice: str):
+        """Stream TTS audio from Speaches"""
+        await self._stream_from_http_endpoint(TTS_URL, text, voice)
 
     async def _stream_from_url(self, url: str, text: str, voice: str):
         """Stream from fallback URL"""
-        await self._stream_from_speaches(text, voice)  # Same implementation
+        await self._stream_from_http_endpoint(url, text, voice)
 
     async def _send_info(self):
         """Send Info event describing TTS capabilities"""
@@ -240,19 +276,35 @@ async def lifespan(app: FastAPI):
     """Start Wyoming TCP servers on startup"""
     global stt_server, tts_server
 
-    # STT Server
-    stt_server = AsyncServer.from_uri("tcp://0.0.0.0:10300")
+    print("🎙️  Starting Wyoming TCP servers...", flush=True)
 
-    # TTS Server
-    tts_server = AsyncServer.from_uri("tcp://0.0.0.0:10210")
+    try:
+        # STT Server
+        stt_server = AsyncServer.from_uri("tcp://0.0.0.0:10300")
+        print(f"✅ Created Wyoming STT server on tcp://0.0.0.0:10300", flush=True)
 
-    # Start servers in background with handler factories
-    asyncio.create_task(stt_server.run(SpeachesSTTHandler))
-    asyncio.create_task(tts_server.run(SpeachesTTSHandler))
+        # TTS Server
+        tts_server = AsyncServer.from_uri("tcp://0.0.0.0:10210")
+        print(f"✅ Created Wyoming TTS server on tcp://0.0.0.0:10210", flush=True)
+
+        # Start servers in background with handler factories
+        asyncio.create_task(stt_server.run(SpeachesSTTHandler))
+        print(f"✅ Started Wyoming STT server task", flush=True)
+
+        asyncio.create_task(tts_server.run(SpeachesTTSHandler))
+        print(f"✅ Started Wyoming TTS server task", flush=True)
+
+        print(f"🎉 Wyoming TCP servers started successfully!", flush=True)
+    except Exception as e:
+        print(f"❌ Failed to start Wyoming servers: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        raise
 
     yield
 
     # Cleanup (not reached in practice, but good form)
+    print("👋 Shutting down Wyoming TCP servers...", flush=True)
     pass
 
 

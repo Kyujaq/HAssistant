@@ -8,9 +8,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python packages
+# Install Python packages (pin NumPy < 2 for ONNX Runtime compatibility)
 COPY requirements.txt ./
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir --user "numpy<2" \
+    && pip install --no-cache-dir --user -r requirements.txt \
+    && pip install --no-cache-dir --user onnxruntime==1.16.3
 
 # Final stage: CUDA runtime + Python packages
 FROM nvidia/cuda:11.4.3-cudnn8-runtime-ubuntu20.04
@@ -21,6 +23,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.9 \
     python3.9-distutils \
+    python3-pip \
     ffmpeg \
     libsndfile1 \
     libespeak-ng1 \
@@ -32,7 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /root/.local /root/.local
 
 # Set PATH
-ENV PATH=/root/.local/bin:$PATH
+ENV PATH=/root/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 

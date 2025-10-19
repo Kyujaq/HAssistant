@@ -99,24 +99,57 @@ logger:
 # NOTE: Kitchen API not available in v2
 
 lovelace:
-   mode: yaml
-   dashboards:
-     memory-dashboard:
-        mode: yaml
-        filename: memory-view.yaml
-        title: Memory
-        icon: mdi:database
-        show_in_sidebar: true
-     speech-dashboard:
-        mode: yaml
-        filename: speech-view.yaml
-        title: Speech
-        icon: mdi:account-voice
-        show_in_sidebar: true
-
-
+  dashboards:
+    memory-dashboard:
+      mode: yaml
+      filename: memory-view.yaml
+      title: Memory
+      icon: mdi:database
+      show_in_sidebar: true
+    speech-dashboard:
+      mode: yaml
+      filename: speech-view.yaml
+      title: Speech
+      icon: mdi:account-voice
+      show_in_sidebar: true
+    inventory-dashboard:
+      mode: yaml
+      filename: inventory-view.yaml
+      title: Inventory
+      icon: mdi:fridge
+      show_in_sidebar: true
+    today-dashboard:
+      mode: yaml
+      filename: today-view.yaml
+      title: Today
+      icon: mdi:calendar-today
+      show_in_sidebar: true
+    night-crew-dashboard:
+      mode: yaml
+      filename: night-crew-view.yaml
+      title: Night Crew
+      icon: mdi:weather-night
+      show_in_sidebar: true
+    vision-signals-dashboard:
+      mode: yaml
+      filename: vision-signals-view.yaml
+      title: Vision Signals
+      icon: mdi:eye
+      show_in_sidebar: true
+    system-health-dashboard:
+      mode: yaml
+      filename: system-health-view.yaml
+      title: System Health
+      icon: mdi:stethoscope
+      show_in_sidebar: true
 panel_iframe:
   dozzle:
     title: Dozzle
     icon: mdi:console
     url: http://dozzle:8080
+
+# Vision cameras from K80 VM - MUST be added via UI (YAML not supported)
+# To add cameras:
+# 1. Settings → Devices & Services → Add Integration → MJPEG Camera
+# 2. Add "Vision Screen Stream": http://192.168.122.71:8051/mjpeg/screen
+# 3. Add "Vision Realworld Stream": http://192.168.122.71:8052/mjpeg/cam

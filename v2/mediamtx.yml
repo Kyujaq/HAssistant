@@ -1,0 +1,34 @@
+# MediaMTX Configuration for HAssistant v2
+# CPU-safe RTSP relay (no encoding)
+
+# Logging
+logLevel: info
+logDestinations: [stdout]
+
+# Disable CPU-heavy features
+hls: false              # HLS off = no segment encoding
+webrtc: false           # WebRTC off = no realtime encoder
+rtmp: false             # RTMP off (not needed)
+
+# Keep only RTSP
+rtspAddress: :8554
+rtsp: true
+
+# API
+api: yes
+apiAddress: 0.0.0.0:9997
+
+# Metrics
+metrics: yes
+metricsAddress: 0.0.0.0:9998
+
+# Stream paths
+paths:
+  # USB webcam stream (pushed by ffmpeg from host)
+  cam1:
+    # Pull only when K80 VM reads it
+    source: publisher
+
+  # Screen capture stream (pushed by ffmpeg)
+  screen:
+    source: publisher

@@ -67,10 +67,8 @@ services:
     build:
       context: ./services/speaches
     container_name: hassistant_v2_speaches
-    runtime: nvidia
     environment:
-      - NVIDIA_VISIBLE_DEVICES=${SPEECH_GPU_INDEX:-1}        # Pin to GPU1 (GTX 1070) - driver 535 supports CUDA 12.1
-      - USE_CUDA=${USE_CUDA:-1}                              # Enable CUDA for faster-whisper (3x faster STT)
+      - USE_CUDA=0                                           # CPU mode (CUDA 11.4/cuDNN8 incompatible with faster-whisper)
       - WHISPER_MODEL=${WHISPER_MODEL:-base.en}             # base.en (fast) or small.en (better)
       - PIPER_VOICE=${PIPER_VOICE:-en_US-lessac-medium}     # GLaDOS-style voice
       - SAMPLE_RATE=${SAMPLE_RATE:-22050}                   # Piper output sample rate
@@ -143,6 +141,14 @@ services:
       default:
         aliases: ["wyoming-piper"]
 
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: hassistant_v2_mediamtx
+    restart: unless-stopped
+    network_mode: host           # simplest; or map 8554/tcp (RTSP), 8888/http
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+
   postgres:
     image: pgvector/pgvector:pg16
     container_name: hassistant_v2_pg
@@ -202,6 +208,13 @@ services:
   orchestrator:
     build: { context: ./services/glados-orchestrator }
     container_name: hassistant_v2_orchestrator
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [utility]
+              device_ids: ['all']
     environment:
       # Text models (GTX 1070)
       - OLLAMA_TEXT_URL=http://ollama-text:11434
@@ -239,7 +252,7 @@ services:
     volumes:
       - orch_state:/app/state
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8020/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8020/health')"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -321,3 +334,4 @@ volumes:
 networks:
   default:
     name: hassistant_v2_default
+    external: true

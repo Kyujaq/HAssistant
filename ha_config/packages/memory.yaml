@@ -31,9 +31,11 @@ sensor:
     resource: http://memory-embed:8001/metrics
     method: GET
     value_template: >
-      {% set value = value | default('') %}
-      {% set sum = value | regex_findall_index('memembed_latency_seconds_sum{route="search"} ([0-9eE\+\.-]+)', 0) | float(0) %}
-      {% set count = value | regex_findall_index('memembed_latency_seconds_count{route="search"} ([0-9eE\+\.-]+)', 0) | float(0) %}
+      {% set metrics = value | default('') %}
+      {% set sum_matches = metrics | regex_findall('memembed_latency_seconds_sum{route="search"} ([0-9eE\\+\\.-]+)') %}
+      {% set count_matches = metrics | regex_findall('memembed_latency_seconds_count{route="search"} ([0-9eE\\+\\.-]+)') %}
+      {% set sum = (sum_matches[0] | float(0)) if sum_matches else 0 %}
+      {% set count = (count_matches[0] | float(0)) if count_matches else 0 %}
       {{ (sum / count) if count > 0 else 0 }}
     unit_of_measurement: s
     timeout: 10

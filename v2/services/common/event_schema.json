@@ -1,0 +1,93 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Vision Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "ts", "frames", "detections", "tags", "meta"],
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "Logical identifier for the producer (e.g. camera.front or screen.work)."
+    },
+    "ts": {
+      "type": ["integer", "number"],
+      "description": "Unix timestamp when the event was captured (seconds)."
+    },
+    "frames": {
+      "type": "array",
+      "description": "Key frames associated with the event (ordered by relevance).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["url"],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "ocr": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "conf": {
+                "type": ["number", "integer"],
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "detections": {
+      "type": "array",
+      "description": "Model detections such as people, gestures, or objects.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "conf"],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "conf": {
+            "type": ["number", "integer"],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "box": {
+            "type": "array",
+            "description": "Optional bounding box [x1, y1, x2, y2] in pixels.",
+            "items": {
+              "type": ["number", "integer"]
+            },
+            "minItems": 4,
+            "maxItems": 4
+          }
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "meta": {
+      "type": "object",
+      "description": "Additional metadata (camera id, zone, etc).",
+      "additionalProperties": true
+    }
+  }
+}

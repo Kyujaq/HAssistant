@@ -1,0 +1,72 @@
+sensor:
+  - platform: rest
+    name: Vision Router Queue Depth
+    resource: http://vision-router:8050/stats
+    value_template: "{{ value_json.queue_depth | float(0) }}"
+    unit_of_measurement: events
+    json_attributes:
+      - lock_enabled
+      - events_total
+      - escalations_total
+      - gpus
+      - config
+    scan_interval: 10
+
+  - platform: template
+    sensors:
+      vision_router_lock_enabled:
+        friendly_name: Vision Lock Enabled
+        value_template: >-
+          {{ state_attr('sensor.vision_router_queue_depth', 'lock_enabled') | default(false) }}
+      vision_router_events_total:
+        friendly_name: Vision Events Total
+        value_template: >-
+          {{ state_attr('sensor.vision_router_queue_depth', 'events_total') | default(0) }}
+        unit_of_measurement: events
+      vision_router_escalations_total:
+        friendly_name: Vision Escalations Total
+        value_template: >-
+          {{ state_attr('sensor.vision_router_queue_depth', 'escalations_total') | default(0) }}
+        unit_of_measurement: events
+      vision_router_gpu0_util_percent:
+        friendly_name: Vision GPU0 Utilization
+        unit_of_measurement: '%'
+        value_template: >-
+          {% set gpus = state_attr('sensor.vision_router_queue_depth', 'gpus') or [] %}
+          {% if gpus | length > 0 %}
+            {{ gpus[0]['util'] | default(0) }}
+          {% else %}0{% endif %}
+      vision_router_gpu0_mem_free_gb:
+        friendly_name: Vision GPU0 Free Memory
+        unit_of_measurement: GB
+        value_template: >-
+          {% set gpus = state_attr('sensor.vision_router_queue_depth', 'gpus') or [] %}
+          {% if gpus | length > 0 %}
+            {{ gpus[0]['mem_free_gb'] | default(0) }}
+          {% else %}0{% endif %}
+
+  - platform: rest
+    name: VL Requests Today
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set total = 0 %}
+      {% for line in value.split('\n') %}
+        {% if line.startswith('route_vl_text_hits_total') %}
+          {% set total = line.split(' ')[-1]|float(0) %}
+        {% endif %}
+      {% endfor %}
+      {{ total|round(0) }}
+    scan_interval: 60
+
+  - platform: rest
+    name: Vision Events Ingested
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set total = 0 %}
+      {% for line in value.split('\n') %}
+        {% if line.startswith('vision_events_ingested_total') %}
+          {% set total = total + line.split(' ')[-1]|float(0) %}
+        {% endif %}
+      {% endfor %}
+      {{ total|round(0) }}
+    scan_interval: 60

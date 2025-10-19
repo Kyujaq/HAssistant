@@ -116,11 +116,16 @@ async def transcribe(file: UploadFile):
 
     try:
         audio_bytes = await file.read()
-        segments, info = whisper_model.transcribe(
-            io.BytesIO(audio_bytes),
-            beam_size=5,
-            vad_filter=True,  # Voice activity detection reduces hallucinations
-        )
+
+        def _run_transcribe() -> tuple[list, object]:
+            segment_iter, transcription_info = whisper_model.transcribe(
+                io.BytesIO(audio_bytes),
+                beam_size=5,
+                vad_filter=True,  # Voice activity detection reduces hallucinations
+            )
+            return list(segment_iter), transcription_info
+
+        segments, info = await asyncio.to_thread(_run_transcribe)
         text = " ".join([seg.text.strip() for seg in segments])
         return JSONResponse(
             {

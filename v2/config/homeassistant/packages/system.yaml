@@ -1,0 +1,101 @@
+switch:
+  - platform: rest
+    name: Privacy Pause
+    resource: http://orchestrator:8020/config
+    body_on: '{"privacy_pause": true}'
+    body_off: '{"privacy_pause": false}'
+    is_on_template: "{{ value_json.privacy_pause | default(false) }}"
+    headers:
+      Content-Type: application/json
+  - platform: rest
+    name: Vision On
+    resource: http://vision-router:8050/config
+    body_on: '{"vision_on": true}'
+    body_off: '{"vision_on": false}'
+    is_on_template: "{{ value_json.vision_on | default(false) }}"
+    headers:
+      Content-Type: application/json
+  - platform: rest
+    name: Screen Watch On
+    resource: http://vision-router:8050/config
+    body_on: '{"screen_watch_on": true}'
+    body_off: '{"screen_watch_on": false}'
+    is_on_template: "{{ value_json.screen_watch_on | default(false) }}"
+    headers:
+      Content-Type: application/json
+
+sensor:
+  - platform: rest
+    name: Orchestrator Config
+    resource: http://orchestrator:8020/config
+    value_template: >
+      {% if value_json.privacy_pause | default(false) %}
+        paused
+      {% else %}
+        active
+      {% endif %}
+    json_attributes:
+      - privacy_pause
+      - energy_band
+      - focus_mode
+    scan_interval: 60
+  - platform: rest
+    name: Orchestrator Privacy Paused Total
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set total = 0 %}
+      {% for line in value.split('\n') %}
+        {% if line.startswith('orchestrator_privacy_paused_total ') %}
+          {% set total = line.split()[-1]|float(0) %}
+        {% endif %}
+      {% endfor %}
+      {{ total|round(0) }}
+    scan_interval: 60
+  - platform: rest
+    name: Orchestrator Memory Pre Avg Ms
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set total = 0 %}
+      {% set count = 0 %}
+      {% for line in value.split('\n') %}
+        {% if line.startswith('orchestrator_memory_pre_ms_sum ') %}
+          {% set total = line.split()[-1]|float(0) %}
+        {% elif line.startswith('orchestrator_memory_pre_ms_count ') %}
+          {% set count = line.split()[-1]|float(0) %}
+        {% endif %}
+      {% endfor %}
+      {% if count > 0 %}
+        {{ (total / count)|float }}
+      {% else %}
+        0
+      {% endif %}
+    scan_interval: 60
+  - platform: rest
+    name: Orchestrator Memory Pre Slow Count
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set le200 = 0 %}
+      {% set total = 0 %}
+      {% for line in value.split('\n') %}
+        {% if 'orchestrator_memory_pre_ms_bucket' in line %}
+          {% if 'le="0.2"' in line %}
+            {% set le200 = line.split()[-1]|float(0) %}
+          {% elif 'le="+Inf"' in line %}
+            {% set total = line.split()[-1]|float(0) %}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+      {{ (total - le200)|round(0) }}
+    scan_interval: 60
+  - platform: rest
+    name: Orchestrator Context Characters Sum
+    resource: http://orchestrator:8020/metrics
+    value_template: >
+      {% set total = 0 %}
+      {% for line in value.split('\n') %}
+        {% if line.startswith('orchestrator_ctx_chars_sum ') %}
+          {% set total = line.split()[-1]|float(0) %}
+        {% endif %}
+      {% endfor %}
+      {{ total|round(0) }}
+    scan_interval: 60
