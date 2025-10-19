@@ -3,16 +3,26 @@ import io
 import json
 import os
 import shutil
+import threading
 import time
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
 from fastapi import Body, FastAPI, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from faster_whisper import WhisperModel
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
-from fastapi.middleware.cors import CORSMiddleware
 from shutil import which
+
+try:
+    from piper import PiperVoice, SynthesisConfig
+
+    _PIPER_PY_AVAILABLE = True
+except ImportError:  # pragma: no cover - fallback to CLI
+    PiperVoice = None  # type: ignore[assignment]
+    SynthesisConfig = None  # type: ignore[assignment]
+    _PIPER_PY_AVAILABLE = False
 
 # Configuration from environment
 USE_CUDA = os.getenv("USE_CUDA", "0") == "1"
@@ -25,6 +35,9 @@ PIPER_VOICE = os.getenv("PIPER_VOICE", "")
 PIPER_VOICE_DIR = Path(os.getenv("PIPER_VOICE_DIR", "/app/voices"))
 PIPER_SPEAKER = os.getenv("PIPER_SPEAKER", "")
 PIPER_LENGTH_SCALE = os.getenv("PIPER_LENGTH_SCALE", "")
+PIPER_NOISE_SCALE = os.getenv("PIPER_NOISE_SCALE", "")
+PIPER_NOISE_W_SCALE = os.getenv("PIPER_NOISE_W_SCALE", "")
+PIPER_USE_PYTHON = os.getenv("PIPER_USE_PYTHON", "1") != "0"
 
 # Prometheus metrics
 REQUESTS = Counter("speaches_requests_total", "Total requests", ["route"])
@@ -62,10 +75,97 @@ if VOICE_MODEL_PATH:
 else:
     VOICE_SAMPLE_RATE = SAMPLE_RATE
 
-PIPER_AVAILABLE = (
+PIPER_CLI_AVAILABLE = (
     PIPER_BINARY is not None and PIPER_BINARY.exists() and os.access(PIPER_BINARY, os.X_OK)
 )
 PYTHON_FALLBACK = which("python3.9") or which("python3")
+
+PIPER_PY_LOCK = threading.Lock()
+PIPER_PY_SYNTH_LOCK = asyncio.Lock()
+_PIPER_VOICE_INSTANCE: Optional["PiperVoice"] = None
+_PIPER_VOICE_ERROR: Optional[str] = None
+
+
+def _optional_float(value: str) -> Optional[float]:
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _optional_int(value: str) -> Optional[int]:
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+PIPER_SPEAKER_ID = _optional_int(PIPER_SPEAKER.strip())
+PIPER_LENGTH_SCALE_VALUE = _optional_float(PIPER_LENGTH_SCALE.strip())
+PIPER_NOISE_SCALE_VALUE = _optional_float(PIPER_NOISE_SCALE.strip())
+PIPER_NOISE_W_SCALE_VALUE = _optional_float(PIPER_NOISE_W_SCALE.strip())
+
+PIPER_RUNTIME = "python" if PIPER_USE_PYTHON and _PIPER_PY_AVAILABLE else "cli"
+PIPER_BACKENDS_AVAILABLE = {
+    "python": _PIPER_PY_AVAILABLE and VOICE_MODEL_PATH is not None,
+    "cli": bool(PIPER_CLI_AVAILABLE or PYTHON_FALLBACK),
+}
+PIPER_AVAILABLE = any(PIPER_BACKENDS_AVAILABLE.values())
+
+
+def _ensure_piper_voice() -> "PiperVoice":
+    global _PIPER_VOICE_INSTANCE, _PIPER_VOICE_ERROR, VOICE_SAMPLE_RATE
+
+    if not PIPER_BACKENDS_AVAILABLE.get("python"):
+        raise RuntimeError("Piper Python backend unavailable")
+
+    if _PIPER_VOICE_INSTANCE is not None:
+        return _PIPER_VOICE_INSTANCE
+
+    if VOICE_MODEL_PATH is None:
+        raise RuntimeError("Piper voice model not found")
+
+    with PIPER_PY_LOCK:
+        if _PIPER_VOICE_INSTANCE is None:
+            try:
+                print(f"🎤 Loading Piper voice {VOICE_MODEL_PATH} (CUDA: {USE_CUDA})")
+                voice = PiperVoice.load(
+                    str(VOICE_MODEL_PATH),
+                    str(VOICE_CONFIG_PATH) if VOICE_CONFIG_PATH else None,
+                    use_cuda=USE_CUDA,
+                )
+                _PIPER_VOICE_INSTANCE = voice
+                try:
+                    VOICE_SAMPLE_RATE = int(voice.config.sample_rate)
+                except Exception:
+                    pass
+            except Exception as exc:  # pragma: no cover - surface load errors
+                _PIPER_VOICE_ERROR = str(exc)
+                raise
+
+    if _PIPER_VOICE_INSTANCE is None:
+        raise RuntimeError(_PIPER_VOICE_ERROR or "Unknown Piper load failure")
+
+    return _PIPER_VOICE_INSTANCE
+
+
+def _build_synthesis_config() -> "SynthesisConfig":
+    if SynthesisConfig is None:
+        raise RuntimeError("SynthesisConfig unavailable")
+    kwargs = {}
+    if PIPER_SPEAKER_ID is not None:
+        kwargs["speaker_id"] = PIPER_SPEAKER_ID
+    if PIPER_LENGTH_SCALE_VALUE is not None:
+        kwargs["length_scale"] = PIPER_LENGTH_SCALE_VALUE
+    if PIPER_NOISE_SCALE_VALUE is not None:
+        kwargs["noise_scale"] = PIPER_NOISE_SCALE_VALUE
+    if PIPER_NOISE_W_SCALE_VALUE is not None:
+        kwargs["noise_w_scale"] = PIPER_NOISE_W_SCALE_VALUE
+    return SynthesisConfig(**kwargs)
 
 # Initialize Whisper model
 print(f"🔧 Initializing Whisper model: {WHISPER_MODEL} (CUDA: {USE_CUDA})")
@@ -88,14 +188,32 @@ app.add_middleware(
 @app.get("/health")
 def health():
     """Health check endpoint."""
+    backend = "unavailable"
+    tts_ok = False
+    tts_error = None
+
+    if PIPER_RUNTIME == "python" and PIPER_BACKENDS_AVAILABLE.get("python"):
+        try:
+            _ensure_piper_voice()
+            backend = "piper-python"
+            tts_ok = True
+        except Exception as exc:  # pragma: no cover - surfaced in response
+            tts_error = str(exc)
+            backend = "piper-cli" if PIPER_BACKENDS_AVAILABLE.get("cli") else "unavailable"
+    elif PIPER_BACKENDS_AVAILABLE.get("cli"):
+        backend = "piper-cli"
+        tts_ok = True
+
     return {
         "ok": True,
         "device": "cuda" if USE_CUDA else "cpu",
         "whisper_model": WHISPER_MODEL,
         "sample_rate": VOICE_SAMPLE_RATE,
-        "tts_status": "piper" if (PIPER_AVAILABLE and VOICE_MODEL_PATH) else "unavailable",
+        "tts_status": "piper" if (tts_ok and VOICE_MODEL_PATH) else "unavailable",
         "tts_voice": str(VOICE_MODEL_PATH) if VOICE_MODEL_PATH else None,
         "piper_voice": VOICE_MODEL_PATH.stem if VOICE_MODEL_PATH else None,
+        "tts_backend": backend,
+        "tts_error": tts_error,
     }
 
 
@@ -141,14 +259,23 @@ async def transcribe(file: UploadFile):
 
 
 async def _piper_stream(text: str, start_time: float) -> AsyncGenerator[bytes, None]:
-    if not (PYTHON_FALLBACK or PIPER_AVAILABLE):
+    if PIPER_RUNTIME == "python" and PIPER_BACKENDS_AVAILABLE.get("python"):
+        async for chunk in _piper_stream_python(text, start_time):
+            yield chunk
+        return
+    async for chunk in _piper_stream_cli(text, start_time):
+        yield chunk
+
+
+async def _piper_stream_cli(text: str, start_time: float) -> AsyncGenerator[bytes, None]:
+    if not (PYTHON_FALLBACK or PIPER_CLI_AVAILABLE):
         raise HTTPException(status_code=500, detail="Piper binary/module not available")
     if not VOICE_MODEL_PATH:
         raise HTTPException(status_code=500, detail="Piper voice model not found")
 
-    if PYTHON_FALLBACK:
+    if PYTHON_FALLBACK and not PIPER_CLI_AVAILABLE:
         args = [PYTHON_FALLBACK, "-m", "piper"]
-    elif PIPER_AVAILABLE:
+    elif PIPER_CLI_AVAILABLE:
         args = [str(PIPER_BINARY)]
     else:
         raise HTTPException(status_code=500, detail="Piper runtime unavailable")
@@ -166,6 +293,10 @@ async def _piper_stream(text: str, start_time: float) -> AsyncGenerator[bytes, N
         args.extend(["--speaker", PIPER_SPEAKER])
     if PIPER_LENGTH_SCALE:
         args.extend(["--length_scale", PIPER_LENGTH_SCALE])
+    if PIPER_NOISE_SCALE:
+        args.extend(["--noise_scale", PIPER_NOISE_SCALE])
+    if PIPER_NOISE_W_SCALE:
+        args.extend(["--noise_w_scale", PIPER_NOISE_W_SCALE])
 
     process = await asyncio.create_subprocess_exec(
         *args,
@@ -210,6 +341,58 @@ async def _piper_stream(text: str, start_time: float) -> AsyncGenerator[bytes, N
             raise HTTPException(
                 status_code=500, detail=f"Piper synthesis failed (exit {returncode}): {detail}"
             )
+
+
+async def _piper_stream_python(text: str, start_time: float) -> AsyncGenerator[bytes, None]:
+    try:
+        voice = _ensure_piper_voice()
+    except Exception as exc:
+        # Fallback to CLI path if load fails
+        print(f"⚠️ Piper Python backend unavailable: {exc}")
+        PIPER_BACKENDS_AVAILABLE["python"] = False
+        async for chunk in _piper_stream_cli(text, start_time):
+            yield chunk
+        return
+
+    syn_config = None
+    if SynthesisConfig is not None:
+        syn_config = _build_synthesis_config()
+
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def worker() -> None:
+        try:
+            for audio_chunk in voice.synthesize(text, syn_config=syn_config):
+                data = getattr(audio_chunk, "audio_int16_bytes", None)
+                if data:
+                    loop.call_soon_threadsafe(queue.put_nowait, data)
+        except Exception as exc:  # pragma: no cover - surface runtime errors
+            loop.call_soon_threadsafe(queue.put_nowait, exc)
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+    first_chunk_at: Optional[float] = None
+
+    async with PIPER_PY_SYNTH_LOCK:
+        worker_future = loop.run_in_executor(None, worker)
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    raise HTTPException(status_code=500, detail=f"Piper synthesis failed: {item}") from item
+                if item:
+                    if first_chunk_at is None:
+                        first_chunk_at = time.time()
+                        LATENCY.labels(route="tts").observe(first_chunk_at - start_time)
+                    yield item
+        finally:
+            await worker_future
+
+    if first_chunk_at is None:
+        LATENCY.labels(route="tts").observe(time.time() - start_time)
 
 
 @app.post("/v1/audio/speech")

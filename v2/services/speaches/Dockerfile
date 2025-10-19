@@ -1,5 +1,5 @@
-# Multi-stage build: Python 3.9 + CUDA 11.4 runtime
-FROM python:3.9-slim as builder
+# Multi-stage build: Python 3.10 + CUDA 12.4 runtime
+FROM python:3.10-slim as builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -12,21 +12,24 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --user "numpy<2" \
     && pip install --no-cache-dir --user -r requirements.txt \
-    && pip install --no-cache-dir --user onnxruntime==1.16.3
+    && pip install --no-cache-dir --user onnxruntime-gpu==1.18.1
 
 # Final stage: CUDA runtime + Python packages
-FROM nvidia/cuda:11.4.3-cudnn8-runtime-ubuntu20.04
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install Python 3.9 and runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.9 \
-    python3.9-distutils \
+    python3 \
+    python3-distutils \
     python3-pip \
     ffmpeg \
     libsndfile1 \
     libespeak-ng1 \
+    libcublas11 \
+    libcublaslt11 \
+    libcudnn8 \
     curl \
     tini \
     && rm -rf /var/lib/apt/lists/*
@@ -45,4 +48,4 @@ COPY . .
 EXPOSE 8000
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["python3.9", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python3", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
