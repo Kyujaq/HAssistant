@@ -17,7 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 _LOGGER = logging.getLogger(__name__)
 
-VISION_GATEWAY_URL = "http://vision-gateway:8088"
+VISION_GATEWAY_URL = "http://192.168.122.71:8051"  # K80 VM vision-gateway
 
 
 async def async_setup_entry(
@@ -50,7 +50,7 @@ class VisionControlAITask(AITaskEntity):
             # Get latest frame from vision-gateway
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    f"{VISION_GATEWAY_URL}/api/latest_frame/hdmi",
+                    f"{VISION_GATEWAY_URL}/frames/latest.jpg",
                     timeout=aiohttp.ClientTimeout(total=5)
                 ) as response:
                     if response.status != 200:
@@ -61,16 +61,18 @@ class VisionControlAITask(AITaskEntity):
                             data={"error": error_msg, "success": False}
                         )
 
-                    frame_data = await response.json()
+                    # Response is JPEG image bytes, not JSON
+                    frame_bytes = await response.read()
+                    frame_size = len(frame_bytes)
 
-            # TODO: For now, return frame availability
-            # When K80 arrives, this will do object detection and return element coordinates
+            # K80 vision-gateway is operational - return frame metadata
             result_data = {
                 "success": True,
-                "frame_available": "image" in frame_data,
-                "timestamp": frame_data.get("timestamp"),
-                "source": frame_data.get("source"),
-                "message": "Vision gateway connected. K80 preprocessing will enable element detection.",
+                "frame_available": True,
+                "frame_size_bytes": frame_size,
+                "source": "vision-gateway (K80 VM)",
+                "endpoint": f"{VISION_GATEWAY_URL}/frames/latest.jpg",
+                "message": "K80 vision-gateway connected. Frame retrieved successfully.",
                 "instructions_received": task.instructions
             }
 

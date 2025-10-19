@@ -1,175 +1,342 @@
-     # === Vision Router: HA control & telemetry ===
-     # Assumes the service is reachable at http://vision-router:8050
-     # If your host/port differs, change the 'resource' and rest_command URLs below.
 
-     homeassistant:
-       customize:
-         switch.vision_on:
-           icon: mdi:eye
-         switch.screen_watch_on:
-           icon: mdi:monitor-eye
-         sensor.vision_queue_depth:
-           icon: mdi:queue-first-in-last-out
-         sensor.vision_lock_enabled:
-           icon: mdi:lock
-         sensor.vision_gpu0_util:
-           icon: mdi:chip
-         sensor.vision_gpu0_mem_free_gb:
-           icon: mdi:memory
-         sensor.vision_gpu1_util:
-           icon: mdi:chip
-         sensor.vision_gpu1_mem_free_gb:
-           icon: mdi:memory
+homeassistant:
+  customize:
+    switch.vision_on:
+      icon: mdi:eye
+    switch.screen_watch_on:
+      icon: mdi:monitor-eye
+    input_number.vision_threshold:
+      icon: mdi:tune
+    input_number.vision_max_frames:
+      icon: mdi:image-multiple
+    camera.screen_feed:
+      icon: mdi:monitor
+    camera.room_cam:
+      icon: mdi:video-wireless
+    sensor.vision_router_queue_depth:
+      icon: mdi:queue-first-in-last-out
+    sensor.vision_router_lock_enabled:
+      icon: mdi:lock
+    sensor.vision_router_gpu0_util_percent:
+      icon: mdi:chip
+    sensor.vision_router_gpu0_mem_free_gb:
+      icon: mdi:memory
 
-     # ---------- Switches (map to /config) ----------
-     switch:
-       - platform: rest
-         name: Vision On
-         resource: http://vision-router:8050/config
-         body_on: '{"vision_on": true}'
-         body_off: '{"vision_on": false}'
-         is_on_template: "{{ value_json.vision_on | default(false) }}"
-         headers:
-           Content-Type: application/json
+switch:
+  - platform: rest
+    name: Vision On
+    resource: http://vision-router:8050/config
+    body_on: '{"vision_on": true}'
+    body_off: '{"vision_on": false}'
+    is_on_template: "{{ value_json.vision_on | default(false) }}"
+    headers:
+      Content-Type: application/json
 
-       - platform: rest
-         name: Screen Watch On
-         resource: http://vision-router:8050/config
-         body_on: '{"screen_watch_on": true}'
-         body_off: '{"screen_watch_on": false}'
-         is_on_template: "{{ value_json.screen_watch_on | default(false) }}"
-         headers:
-           Content-Type: application/json
+  - platform: rest
+    name: Screen Watch On
+    resource: http://vision-router:8050/config
+    body_on: '{"screen_watch_on": true}'
+    body_off: '{"screen_watch_on": false}'
+    is_on_template: "{{ value_json.screen_watch_on | default(false) }}"
+    headers:
+      Content-Type: application/json
 
-     # ---------- Controls (runtime tuning via /config) ----------
-     input_number:
-       vision_threshold:
-         name: Vision Escalation Threshold
-         min: 0
-         max: 1
-         step: 0.01
-         mode: slider
-         icon: mdi:tune
-         initial: 0.55
+input_number:
+  vision_threshold:
+    name: Vision Escalation Threshold
+    min: 0
+    max: 1
+    step: 0.01
+    mode: slider
+    icon: mdi:tune
+    initial: 0.55
 
-       vision_max_frames:
-         name: Vision Max Frames Per Bundle
-         min: 1
-         max: 12
-         step: 1
-         mode: slider
-         icon: mdi:image-multiple
-         initial: 6
+  vision_max_frames:
+    name: Vision Max Frames Per Bundle
+    min: 1
+    max: 12
+    step: 1
+    mode: slider
+    icon: mdi:image-multiple
+    initial: 6
 
-     rest_command:
-       set_vision_config:
-         url: http://vision-router:8050/config
-         method: POST
-         headers:
-           Content-Type: application/json
-         payload: "{{ payload }}"
+rest_command:
+  set_vision_config:
+    url: http://orchestrator:8020/vision/config
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload: "{{ payload }}"
 
-     # Sync HA controls to router config live
-     automation:
-       - id: vr_update_threshold
-         alias: Vision Router - Update Threshold
-         trigger:
-           - platform: state
-             entity_id: input_number.vision_threshold
-         action:
-           - service: rest_command.set_vision_config
-             data:
-               payload: >
-                 {"threshold": {{ states('input_number.vision_threshold') | float }} }
+automation:
+  - id: vr_update_threshold
+    alias: Vision Router - Update Threshold
+    trigger:
+      - platform: state
+        entity_id: input_number.vision_threshold
+    action:
+      - service: rest_command.set_vision_config
+        data:
+          payload: >
+            {"threshold": {{ states('input_number.vision_threshold') | float }} }
 
-       - id: vr_update_max_frames
-         alias: Vision Router - Update Max Frames
-         trigger:
-           - platform: state
-             entity_id: input_number.vision_max_frames
-         action:
-           - service: rest_command.set_vision_config
-             data:
-               payload: >
-                 {"max_frames": {{ states('input_number.vision_max_frames') | int }} }
+  - id: vr_update_max_frames
+    alias: Vision Router - Update Max Frames
+    trigger:
+      - platform: state
+        entity_id: input_number.vision_max_frames
+    action:
+      - service: rest_command.set_vision_config
+        data:
+          payload: >
+            {"max_frames": {{ states('input_number.vision_max_frames') | int }} }
 
-     # ---------- Stats (map to /stats) ----------
-     # JSON structure assumed:
-     # {
-     #   "queue_depth": 0,
-     #   "lock_enabled": false,
-     #   "config": {"vision_on":true,"screen_watch_on":true,"threshold":0.55,"max_frames":6},
-     #   "gpus": [{"index":0,"util":23,"mem_free_gb":8.1,"mem_total_gb":11.2}, ...]
-     # }
-     sensor:
-       - platform: rest
-         name: Vision Queue Depth
-         resource: http://vision-router:8050/stats
-         value_template: "{{ value_json.queue_depth | default(0) }}"
-         scan_interval: 10
+  # ============================================================================
+  # Voice-Triggered Vision Automations
+  # ============================================================================
 
-       - platform: rest
-         name: Vision Lock Enabled
-         resource: http://vision-router:8050/stats
-         value_template: "{{ value_json.lock_enabled | default(false) }}"
-         scan_interval: 10
+  - id: glados_screen_query_whats_on
+    alias: "GLaDOS: Voice - What's on my screen"
+    description: "Trigger screen analysis from voice command"
+    trigger:
+      - platform: conversation
+        command:
+          - "what[']s on my screen"
+          - "what is on my screen"
+          - "describe my screen"
+          - "describe my display"
+          - "what am I looking at"
+    action:
+      - service: script.glados_describe_screen
+    mode: single
 
-       # GPU 0
-       - platform: rest
-         name: Vision GPU0 Util
-         resource: http://vision-router:8050/stats
-         value_template: >
-           {% set g = value_json.gpus | default([]) %}
-           {% if g|length > 0 %}{{ g[0].util | float }}{% else %}0{% endif %}
-         unit_of_measurement: "%"
-         scan_interval: 30
+  - id: glados_screen_query_applications
+    alias: "GLaDOS: Voice - What applications are open"
+    description: "Analyze open applications from voice"
+    trigger:
+      - platform: conversation
+        command:
+          - "what applications are open"
+          - "what programs are running"
+          - "what[']s on my desktop"
+    action:
+      - service: script.glados_analyze_camera
+        data:
+          camera_source: camera.screen_feed
+          question: "What applications or windows are currently open on this screen?"
+    mode: single
 
-       - platform: rest
-         name: Vision GPU0 Mem Free GB
-         resource: http://vision-router:8050/stats
-         value_template: >
-           {% set g = value_json.gpus | default([]) %}
-           {% if g|length > 0 %}{{ g[0].mem_free_gb | float }}{% else %}0{% endif %}
-         unit_of_measurement: "GB"
-         scan_interval: 30
+  - id: glados_door_query
+    alias: "GLaDOS: Voice - Who's at the door"
+    description: "Check door camera from voice command"
+    trigger:
+      - platform: conversation
+        command:
+          - "who[']s at the door"
+          - "who is at the door"
+          - "check the door"
+          - "check the front door"
+          - "what do you see at the door"
+    action:
+      - service: script.glados_check_door
+    mode: single
 
-       # GPU 1 (optional; shows 0 if not present)
-       - platform: rest
-         name: Vision GPU1 Util
-         resource: http://vision-router:8050/stats
-         value_template: >
-           {% set g = value_json.gpus | default([]) %}
-           {% if g|length > 1 %}{{ g[1].util | float }}{% else %}0{% endif %}
-         unit_of_measurement: "%"
-         scan_interval: 30
+  - id: glados_camera_query
+    alias: "GLaDOS: Voice - Check camera"
+    description: "General camera check from voice"
+    trigger:
+      - platform: conversation
+        command:
+          - "check the [room] camera"
+          - "what do you see on the camera"
+          - "show me the [room]"
+    action:
+      - service: script.glados_check_door
+    mode: single
 
-       - platform: rest
-         name: Vision GPU1 Mem Free GB
-         resource: http://vision-router:8050/stats
-         value_template: >
-           {% set g = value_json.gpus | default([]) %}
-           {% if g|length > 1 %}{{ g[1].mem_free_gb | float }}{% else %}0{% endif %}
-         unit_of_measurement: "GB"
-         scan_interval: 30
+  - id: glados_test_vision_connection
+    alias: "GLaDOS: Voice - Test vision system"
+    description: "Test K80 VM vision-gateway connection"
+    trigger:
+      - platform: conversation
+        command:
+          - "test vision [system]"
+          - "check vision [connection]"
+          - "is vision working"
+    action:
+      - service: script.glados_vision_control_test
+    mode: single
 
-     # ---------- Optional: alerts ----------
-     binary_sensor:
-       - platform: template
-         sensors:
-           vision_queue_high:
-             friendly_name: "Vision Queue High"
-             value_template: "{{ states('sensor.vision_queue_depth') | int > 5 }}"
+sensor:
+  - platform: rest
+    name: Vision Router Queue Depth
+    resource: http://vision-router:8050/stats
+    value_template: "{{ value_json.queue_depth | float(0) }}"
+    unit_of_measurement: events
+    json_attributes:
+      - lock_enabled
+      - events_total
+      - escalations_total
+      - gpus
+      - config
+    scan_interval: 10
 
-     automation:
-       - id: vr_alert_queue_high
-         alias: Vision Router - High Queue Alert
-         trigger:
-           - platform: state
-             entity_id: binary_sensor.vision_queue_high
-             to: 'on'
-             for: '00:01:00'
-         action:
-           - service: persistent_notification.create
-             data:
-               title: "Vision Router"
-               message: "Queue depth has been > 5 for at least 1 minute."
+  - platform: template
+    sensors:
+      vision_router_lock_enabled:
+        friendly_name: Vision Lock Enabled
+        value_template: >-
+          {{ state_attr('sensor.vision_router_queue_depth', 'lock_enabled') | default(false) }}
+      vision_router_events_total:
+        friendly_name: Vision Events Total
+        unit_of_measurement: events
+        value_template: >-
+          {{ state_attr('sensor.vision_router_queue_depth', 'events_total') | default(0) }}
+      vision_router_escalations_total:
+        friendly_name: Vision Escalations Total
+        unit_of_measurement: events
+        value_template: >-
+          {{ state_attr('sensor.vision_router_queue_depth', 'escalations_total') | default(0) }}
+      vision_router_gpu0_util_percent:
+        friendly_name: Vision GPU0 Utilization
+        unit_of_measurement: '%'
+        value_template: >-
+          {% set g = state_attr('sensor.vision_router_queue_depth', 'gpus') or [] %}
+          {% if g | length > 0 %}{{ g[0]['util'] | default(0) }}{% else %}0{% endif %}
+      vision_router_gpu0_mem_free_gb:
+        friendly_name: Vision GPU0 Free Memory
+        unit_of_measurement: GB
+        value_template: >-
+          {% set g = state_attr('sensor.vision_router_queue_depth', 'gpus') or [] %}
+          {% if g | length > 0 %}{{ g[0]['mem_free_gb'] | default(0) }}{% else %}0{% endif %}
+
+camera:
+  - platform: mjpeg
+    name: Screen Feed
+    mjpeg_url: http://192.168.122.71:8051/mjpeg/screen  # K80 VM vision-gateway
+    verify_ssl: false
+  - platform: mjpeg
+    name: Room Cam
+    mjpeg_url: http://192.168.122.71:8052/mjpeg/cam  # K80 VM realworld-gateway
+    verify_ssl: false
+
+# ============================================================================
+# Vision Scripts - Voice-triggered vision analysis
+# ============================================================================
+# NOTE: Replace 'YOUR_LLM_VISION_CONFIG_ID' below with the actual config entry ID
+# from Settings -> Devices & Services -> LLM Vision -> (three dots) -> System Options
+# ============================================================================
+
+script:
+  glados_describe_screen:
+    alias: "GLaDOS: What's on my screen?"
+    icon: mdi:monitor-eye
+    description: "Analyze and describe what's currently on the screen"
+    sequence:
+      - service: llmvision.image_analyzer
+        data:
+          provider: 01K7D5SSQ6VBNJSVY4EFWW393G  # <-- REPLACE THIS
+          message: "Describe what you see on this computer screen. Focus on any important information, active windows, or notable content."
+          image_entity: camera.screen_feed
+          use_memory: true
+          generate_title: true
+          target_width: 1280
+          max_tokens: 500
+        response_variable: vision_response
+
+      - service: tts.speak
+        target:
+          entity_id: tts.piper_glados  # Adjust if your TTS entity name differs
+        data:
+          message: "{{ vision_response.response_text }}"
+
+  glados_check_door:
+    alias: "GLaDOS: Who's at the door?"
+    icon: mdi:door-open
+    description: "Analyze the front door camera feed"
+    sequence:
+      - service: llmvision.stream_analyzer
+        data:
+          provider: 01K7D5SSQ6VBNJSVY4EFWW393G  # <-- REPLACE THIS
+          message: "Who or what is visible at the door? Describe any people, animals, or objects you see. Be specific about appearance and activity."
+          image_entity: camera.room_cam
+          duration: 3
+          max_frames: 2
+          use_memory: true
+          generate_title: true
+          target_width: 1280
+          max_tokens: 500
+        response_variable: vision_response
+
+      - service: tts.speak
+        target:
+          entity_id: tts.piper_glados
+        data:
+          message: "{{ vision_response.response_text }}"
+
+  glados_analyze_camera:
+    alias: "GLaDOS: Analyze specific camera"
+    icon: mdi:camera-iris
+    description: "Flexible vision analysis with custom question"
+    fields:
+      camera_source:
+        description: "Which camera to analyze"
+        example: "camera.screen_feed"
+        selector:
+          entity:
+            domain: camera
+      question:
+        description: "What to ask about the image"
+        example: "What applications are open?"
+        selector:
+          text:
+            multiline: true
+    sequence:
+      - service: llmvision.image_analyzer
+        data:
+          provider: 01K7D5SSQ6VBNJSVY4EFWW393G  # <-- REPLACE THIS
+          message: "{{ question }}"
+          image_entity: "{{ camera_source }}"
+          use_memory: true
+          generate_title: true
+          target_width: 1280
+          max_tokens: 500
+        response_variable: vision_response
+
+      - service: tts.speak
+        target:
+          entity_id: tts.piper_glados
+        data:
+          message: "{{ vision_response.response_text }}"
+
+  glados_vision_control_test:
+    alias: "GLaDOS: Test Vision Control AI Task"
+    icon: mdi:robot-happy
+    description: "Test the Vision Control AI Task integration (K80 VM connection)"
+    sequence:
+      - service: ai_task.generate_data
+        target:
+          entity_id: ai_task.vision_control
+        data:
+          task_name: "screen_analysis"
+          instructions: "Analyze what's currently on the screen and return available UI elements"
+        response_variable: vision_task_result
+
+      - service: persistent_notification.create
+        data:
+          title: "Vision Control AI Task Result"
+          message: |
+            **Status:** {{ vision_task_result.data.success }}
+            **Source:** {{ vision_task_result.data.source }}
+            **Frame Available:** {{ vision_task_result.data.frame_available }}
+            **Endpoint:** {{ vision_task_result.data.endpoint }}
+            **Message:** {{ vision_task_result.data.message }}
+
+      - condition: template
+        value_template: "{{ vision_task_result.data.success }}"
+
+      - service: tts.speak
+        target:
+          entity_id: tts.piper_glados
+        data:
+          message: "Vision control connection successful. K80 vision gateway is operational."
