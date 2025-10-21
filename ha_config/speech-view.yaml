@@ -3,16 +3,14 @@ views:
     path: speech
     cards:
       - type: entities
-        title: Speaches
+        title: Speech Pipeline
         entities:
-          - sensor.speaches_health
-          - sensor.speaches_stt_latency
-          - sensor.speaches_tts_latency
+          - sensor.whisper_stt_health
+          - sensor.whisper_stt_latency
           - switch.tts_fallback_wyoming_piper
       - type: history-graph
-        title: Latency (6h)
+        title: STT Latency (6h)
         entities:
-          - sensor.speaches_stt_latency
-          - sensor.speaches_tts_latency
+          - sensor.whisper_stt_latency
         hours_to_show: 6
         refresh_interval: 60

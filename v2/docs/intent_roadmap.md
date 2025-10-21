@@ -245,28 +245,24 @@ Everything should be surfaced and controllable through **Home Assistant** in add
 * Services:
 
   1. **ollama-chat** (GPU1) — expose 11434; healthcheck `/api/tags`. (We’ll load Hermes3 + Qwen3‑4B.)
-  2. **wyoming_openai** — listens on **TCP 10300 (STT)** and **TCP 10200 (TTS)** for HA; forwards to Speaches endpoints.
-  3. **speaches** (GPU1) — OpenAI‑compatible server providing:
-
-     * STT: `POST /v1/audio/transcriptions` (faster‑whisper, CUDA)
-     * TTS: `POST /v1/audio/speech` (Piper/Kokoro)
-       Expose the HTTP port and add a `/health` endpoint healthcheck.
-  4. **wyoming-piper** (GPU1) — native fallback/A‑B for streaming TTS.
+  2. **wyoming_openai** — listens on **TCP 10300 (STT)** and **TCP 10210 (TTS)** for HA; forwards to the local Whisper/Piper services.
+  3. **whisper-stt** (GPU1) — FastAPI wrapper around Faster-Whisper; exposes `POST /v1/audio/transcriptions`.
+  4. **piper-main** (GPU1) — Wyoming-capable Piper server (via `lscr.io/linuxserver/piper:gpu`).
+  5. **wyoming-piper** (CPU) — native fallback/A‑B for streaming TTS.
 * **GPU pinning**: all the above should run on **GPU1** (`NVIDIA_VISIBLE_DEVICES=1` or `device_requests`).
 * **Healthchecks** for every container; `restart: on-failure:3`.
 * **Networks**: default is fine (Compose will create `hassistant_v2_default`).
 
-**wyoming_openai → Speaches mapping (use environment vars):**
+**wyoming_openai → speech stack mapping (env vars):**
 
 ```
-ASR_URL=http://speaches:PORT/v1/audio/transcriptions
-TTS_URL=http://speaches:PORT/v1/audio/speech
+ASR_URL=http://whisper-stt:8000/v1/audio/transcriptions
+PRIMARY_TTS_HOST=piper-main
+PRIMARY_TTS_PORT=10200
 # Optional fallbacks
 FALLBACK_TTS_HOST=wyoming-piper
 FALLBACK_TTS_PORT=10200
 ```
-
-*(Replace `PORT` with the actual Speaches container port per its image/README.)*
 
 ### B) `v2/scripts/model_load.sh`
 

@@ -21,8 +21,9 @@ id_ed25519.pub
 models/*
 
 # Downloaded voice/STT models (auto-downloaded by Wyoming)
-piper_data/
-whisper_data/
+/piper_data/
+/whisper_data/
+v2/services/piper_data/*.onnx
 
 # Logs
 *.log
@@ -95,6 +96,8 @@ temp/
 *.tmp
 *.bak
 *.backup
+data/
+v2/v1/ha_config/
 
 # Home Assistant runtime files
 ha_config/*.db

@@ -83,12 +83,16 @@ VISION_TIMEOUT_S = float(os.getenv("VISION_TIMEOUT_S", "3.0"))
 
 # Realtime streaming configuration
 REALTIME_STREAM_ENABLED = os.getenv("ENABLE_REALTIME_STREAMING", "0") == "1"
-SPEACHES_REALTIME_URL = os.getenv("SPEACHES_REALTIME_URL", "ws://speaches:8000/realtime")
+PIPELINE_REALTIME_URL = os.getenv("PIPELINE_REALTIME_URL", "")
 REALTIME_FLUSH_MARKERS = os.getenv("REALTIME_FLUSH_MARKERS", ".?!\n")
 REALTIME_CONNECT_TIMEOUT = float(os.getenv("REALTIME_CONNECT_TIMEOUT", "2.0"))
 REALTIME_READ_TIMEOUT = float(os.getenv("REALTIME_READ_TIMEOUT", "30.0"))
 REALTIME_SESSION_TTL = float(os.getenv("REALTIME_SESSION_TTL", "30.0"))
 REALTIME_SAMPLE_RATE_DEFAULT = int(os.getenv("REALTIME_SAMPLE_RATE", "22050"))
+
+HA_BASE_URL = os.getenv("HA_BASE_URL")
+HA_TOKEN = os.getenv("HA_TOKEN")
+HA_EVENT_TIMEOUT = float(os.getenv("HA_EVENT_TIMEOUT", "5.0"))
 
 # Vision router configuration
 VISION_ROUTER_URL = os.getenv("VISION_ROUTER_URL", "http://vision-router:8050")
@@ -112,15 +116,26 @@ REALTIME_SESSION_CACHE: Dict[str, Dict[str, Any]] = {}
 REALTIME_SESSION_CACHE_LOCK = asyncio.Lock()
 
 
-async def _register_realtime_session(text: str, session_id: str, voice: Optional[str]) -> None:
+async def _register_realtime_session(
+    text: str,
+    session_id: str,
+    voice: Optional[str],
+    sample_rate: Optional[int] = None,
+) -> None:
     if not text or not session_id:
         return
     now = time.time()
+    resolved_rate = REALTIME_SAMPLE_RATE_DEFAULT
+    if sample_rate is not None:
+        try:
+            resolved_rate = max(8000, int(sample_rate))
+        except (TypeError, ValueError):
+            resolved_rate = REALTIME_SAMPLE_RATE_DEFAULT
     entry = {
         "session_id": session_id,
         "voice": voice,
-        "realtime_url": SPEACHES_REALTIME_URL,
-        "sample_rate": REALTIME_SAMPLE_RATE_DEFAULT,
+        "realtime_url": PIPELINE_REALTIME_URL,
+        "sample_rate": resolved_rate,
         "expires": now + REALTIME_SESSION_TTL,
     }
     aliases = {text}
@@ -218,6 +233,65 @@ app.add_middleware(
 )
 bg = Bg()
 mem = MemoryClient()
+
+_HA_GROCERY_KEYWORDS = {
+    "grocery",
+    "groceries",
+    "inventory",
+    "pantry",
+    "fridge",
+    "food",
+    "kitchen",
+}
+
+
+async def _ha_fire_event(event_type: str, payload: Dict[str, Any]) -> None:
+    if not HA_BASE_URL or not HA_TOKEN:
+        return
+    base = HA_BASE_URL.rstrip("/")
+    timeout = httpx.Timeout(HA_EVENT_TIMEOUT, read=HA_EVENT_TIMEOUT)
+    headers = {
+        "Authorization": f"Bearer {HA_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            await client.post(f"{base}/api/events/{event_type}", json=payload, headers=headers)
+    except Exception as exc:
+        logger.warning("Failed to post HA event %s: %s", event_type, exc)
+
+
+def _should_emit_grocery_event(
+    tags: List[str], detections: List[Dict[str, Any]], meta: Dict[str, Any]
+) -> bool:
+    lowered_tags = {tag.lower() for tag in tags}
+    if _HA_GROCERY_KEYWORDS.intersection(lowered_tags):
+        return True
+
+    for detection in detections:
+        label = str(detection.get("label", "")).lower()
+        if label in {"product", "grocery", "food", "item"}:
+            return True
+
+    meta_task = str(meta.get("task", "")).lower()
+    if meta_task and any(keyword in meta_task for keyword in _HA_GROCERY_KEYWORDS):
+        return True
+
+    meta_kind = str(meta.get("kind", "")).lower()
+    if meta_kind and any(keyword in meta_kind for keyword in _HA_GROCERY_KEYWORDS):
+        return True
+
+    return False
+
+
+def _extract_primary_frame(frames: List[Dict[str, Any]]) -> Optional[str]:
+    for frame in frames:
+        if not isinstance(frame, dict):
+            continue
+        url = frame.get("url")
+        if url:
+            return str(url)
+    return None
 
 
 # ===== Vision Context Helper =====
@@ -385,13 +459,18 @@ async def vision_event(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
         for tag in raw_tags:
             if isinstance(tag, (str, int, float)):
                 tags.append(str(tag))
-    k80_payload = event.get("k80")
-    if isinstance(k80_payload, dict):
-        k80_tags = k80_payload.get("tags")
-        if isinstance(k80_tags, list):
-            for tag in k80_tags:
-                if isinstance(tag, (str, int, float)):
-                    tags.append(str(tag))
+
+    k80_payload_raw = event.get("k80")
+    k80_payload = k80_payload_raw if isinstance(k80_payload_raw, dict) else {}
+    k80_tags = list(k80_payload.get("tags") or [])
+    k80_detections: List[Dict[str, Any]] = list(k80_payload.get("detections") or [])
+    k80_meta: Dict[str, Any] = dict(k80_payload.get("meta") or {})
+    k80_frames: List[Dict[str, Any]] = list(k80_payload.get("frames") or [])
+
+    for tag in k80_tags:
+        if isinstance(tag, (str, int, float)):
+            tags.append(str(tag))
+
     # Deduplicate tags while keeping order
     seen_tags: Set[str] = set()
     deduped_tags: List[str] = []
@@ -399,6 +478,17 @@ async def vision_event(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
         if tag not in seen_tags:
             seen_tags.add(tag)
             deduped_tags.append(tag)
+
+    if not k80_detections:
+        k80_detections = list(event.get("detections") or [])
+
+    top_level_meta = event.get("meta")
+    combined_meta: Dict[str, Any] = dict(k80_meta)
+    if isinstance(top_level_meta, dict):
+        combined_meta.update(top_level_meta)
+
+    if not k80_frames:
+        k80_frames = list(event.get("frames") or [])
 
     memory_kind = "vision_pre" if stage == "pre" else "vision_post"
     VISION_EVENTS_TOTAL.labels(stage=stage, source=source, kind=memory_kind).inc()
@@ -428,6 +518,7 @@ async def vision_event(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
 
     summary = _extract_vl_summary(vl_payload) if stage == "post" else ""
     sticky_until = conv_sticky_until.get(conv_id, 0.0)
+    vl_used = False
 
     if stage == "post":
         vl_used = bool(summary)
@@ -455,7 +546,35 @@ async def vision_event(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
                 if config_state.get("vision_tts_notify"):
                     bg.spawn(_vision_tts_notify(notification_text), name=f"vision_tts_{turn_id[:8]}")
 
-    return JSONResponse(response)
+        ha_payload: Dict[str, Any] = {
+            "event_id": event_id,
+            "turn_id": turn_id,
+            "source": source,
+            "score": event.get("score"),
+            "tags": deduped_tags,
+            "detections": k80_detections,
+            "meta": combined_meta,
+            "vl_summary": summary,
+            "vl_used": vl_used,
+            "ts": event.get("ts"),
+        }
+
+        primary_frame = _extract_primary_frame(k80_frames)
+        if not primary_frame:
+            primary_frame = _extract_primary_frame(event.get("frames") or [])
+        if primary_frame:
+            ha_payload["frame"] = primary_frame
+
+        bg.spawn(
+            _ha_fire_event("vision_router.event", ha_payload),
+            name=f"ha_vision_event_{event_id[:8]}",
+        )
+
+        if _should_emit_grocery_event(deduped_tags, k80_detections, combined_meta):
+            bg.spawn(
+                _ha_fire_event("vision_router.grocery_detected", ha_payload),
+                name=f"ha_grocery_event_{event_id[:8]}",
+            )
 
     return JSONResponse(response)
 
@@ -981,16 +1100,20 @@ async def call_ollama_model_stream(
                     break
 
 
-async def stream_to_speaches(
+async def stream_to_realtime(
     session_id: str,
     queue: "asyncio.Queue[tuple[str, Optional[str]]]",
     ready_future: asyncio.Future,
     voice: Optional[str] = None,
 ) -> None:
-    """Forward text/audio events to Speaches realtime websocket."""
+    """Forward text/audio events to realtime TTS websocket."""
     try:
+        ready_payload: Dict[str, Any] = {
+            "sample_rate": REALTIME_SAMPLE_RATE_DEFAULT,
+            "voice": voice,
+        }
         async with websockets.connect(
-            SPEACHES_REALTIME_URL,
+            PIPELINE_REALTIME_URL,
             open_timeout=REALTIME_CONNECT_TIMEOUT,
             close_timeout=REALTIME_READ_TIMEOUT,
             ping_interval=None,
@@ -1000,11 +1123,26 @@ async def stream_to_speaches(
                 init_payload["voice"] = voice
             await ws.send(json.dumps(init_payload))
             try:
-                await asyncio.wait_for(ws.recv(), timeout=REALTIME_READ_TIMEOUT)
+                ready_raw = await asyncio.wait_for(ws.recv(), timeout=REALTIME_READ_TIMEOUT)
+                try:
+                    ready_msg = json.loads(ready_raw)
+                except json.JSONDecodeError:
+                    ready_msg = None
             except (asyncio.TimeoutError, ConnectionClosedOK, ConnectionClosedError):
-                pass
+                ready_msg = None
+
+            if isinstance(ready_msg, dict):
+                sample_rate_val = ready_msg.get("sample_rate")
+                try:
+                    ready_payload["sample_rate"] = max(8000, int(sample_rate_val))
+                except (TypeError, ValueError):
+                    pass
+                ready_voice = ready_msg.get("voice")
+                if isinstance(ready_voice, str) and ready_voice:
+                    ready_payload["voice"] = ready_voice
+
             if not ready_future.done():
-                ready_future.set_result(True)
+                ready_future.set_result(dict(ready_payload))
 
             while True:
                 kind, value = await queue.get()
@@ -1016,7 +1154,7 @@ async def stream_to_speaches(
                     await ws.send(json.dumps({"type": "done"}))
                     break
         if not ready_future.done():
-            ready_future.set_result(True)
+            ready_future.set_result(dict(ready_payload))
     except Exception as exc:
         logger.warning("Realtime streaming unavailable for session %s: %s", session_id, exc)
         if not ready_future.done():
@@ -1388,63 +1526,73 @@ User: {user_text}
 Assistant:"""
 
     # --- LLM CALL (with intelligent routing) ---
-    speaches_queue: Optional[asyncio.Queue] = None
-    speaches_task: Optional[asyncio.Task] = None
+    realtime_queue: Optional[asyncio.Queue] = None
+    realtime_task: Optional[asyncio.Task] = None
     stream_ready: Optional[asyncio.Future] = None
+    realtime_ready_info: Optional[Dict[str, Any]] = None
     flush_markers = tuple(REALTIME_FLUSH_MARKERS)
 
     async def _stream_chunk(chunk: str) -> None:
-        if not chunk or speaches_queue is None:
+        if not chunk or realtime_queue is None:
             return
-        await speaches_queue.put(("text", chunk))
+        await realtime_queue.put(("text", chunk))
         if any(marker in chunk for marker in flush_markers):
-            await speaches_queue.put(("flush", None))
+            await realtime_queue.put(("flush", None))
 
     if REALTIME_STREAM_ENABLED:
         try:
             loop = asyncio.get_running_loop()
-            speaches_queue = asyncio.Queue()
+            realtime_queue = asyncio.Queue()
             stream_ready = loop.create_future()
-            speaches_task = asyncio.create_task(
-                stream_to_speaches(
+            realtime_task = asyncio.create_task(
+                stream_to_realtime(
                     turn_id,
-                    speaches_queue,
+                    realtime_queue,
                     stream_ready,
                     None,
                 )
             )
             ready = await asyncio.wait_for(stream_ready, REALTIME_CONNECT_TIMEOUT + 1.0)
-            if not ready:
-                speaches_queue = None
+            if not isinstance(ready, dict):
+                realtime_queue = None
+            else:
+                realtime_ready_info = ready
         except Exception as exc:
             logger.debug("Realtime stream setup failed: %s", exc)
-            speaches_queue = None
+            realtime_queue = None
         finally:
-            if speaches_queue is None and speaches_task:
-                speaches_task.cancel()
+            if realtime_queue is None and realtime_task:
+                realtime_task.cancel()
                 with suppress(Exception):
-                    await speaches_task
-                speaches_task = None
+                    await realtime_task
+                realtime_task = None
 
     try:
-        if speaches_queue is not None:
+        if realtime_queue is not None:
             reply = await route_and_generate(conv_id, prompt, user_text, stream_handler=_stream_chunk)
         else:
             reply = await route_and_generate(conv_id, prompt, user_text)
     finally:
-        if speaches_queue is not None:
+        if realtime_queue is not None:
             try:
-                await speaches_queue.put(("flush", None))
-                await speaches_queue.put(("close", None))
+                await realtime_queue.put(("flush", None))
+                await realtime_queue.put(("close", None))
             except Exception:
                 pass
-            if speaches_task:
+            if realtime_task:
                 with suppress(Exception):
-                    await speaches_task
+                    await realtime_task
 
     logger.info(f"LLM reply: {reply[:100]}...")
-    if REALTIME_STREAM_ENABLED and speaches_queue is not None:
-        await _register_realtime_session(reply, turn_id, None)
+    if REALTIME_STREAM_ENABLED and realtime_queue is not None:
+        sample_rate_hint: Optional[int] = None
+        voice_hint: Optional[str] = None
+        if isinstance(realtime_ready_info, dict):
+            sample_rate_hint = realtime_ready_info.get("sample_rate")
+            raw_voice = realtime_ready_info.get("voice")
+            if isinstance(raw_voice, str) and raw_voice:
+                voice_hint = raw_voice
+        await _register_realtime_session(reply, turn_id, voice_hint, sample_rate_hint)
 
     # --- POST-STORAGE (fire-and-forget) ---
     t1 = time.time()

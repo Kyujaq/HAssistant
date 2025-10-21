@@ -35,7 +35,7 @@ Expected:
 3. Configure:
    - **Host**: `wyoming-openai` (or `hassistant_v2_wyoming_proxy` if using IP)
    - **Port**: `10300`
-4. Save as **"Wyoming STT (Speaches)"**
+4. Save as **"Wyoming STT (Whisper STT)"**
 
 ### 1b. Add Wyoming TTS (Text-to-Speech)
 
@@ -71,7 +71,7 @@ Expected:
 |---------|-------|
 | **Name** | `GLaDOS` |
 | **Conversation Agent** | `GLaDOS Orchestrator` |
-| **Speech-to-Text** | `Wyoming STT (Speaches)` |
+| **Speech-to-Text** | `Wyoming STT (Whisper STT)` |
 | **Text-to-Speech** | `Wyoming TTS (Piper GLaDOS)` |
 | **Wake Word** | _(Leave blank or use "Ok Nabu")_ |
 
@@ -120,12 +120,12 @@ curl -X POST http://localhost:8020/v1/chat/completions \
 
 Edit `v2/docker-compose.yml`:
 ```yaml
-speaches:
+whisper-stt:
   environment:
     - PIPER_LENGTH_SCALE=0.9  # Faster (0.5-1.5)
 ```
 
-Restart: `docker compose -f v2/docker-compose.yml up -d speaches`
+Restart: `docker compose -f v2/docker-compose.yml up -d whisper-stt`
 
 ### Change LLM Model Selection
 
@@ -178,7 +178,7 @@ docker logs -f hassistant_v2_orchestrator
 docker logs -f hassistant_v2_wyoming_proxy
 
 # Speech backend
-docker logs -f hassistant_v2_speaches
+docker logs -f hassistant_v2_whisper-stt
 ```
 
 ---
@@ -209,7 +209,7 @@ nc -zv wyoming-openai 10300
 
 Should connect successfully.
 
-**Check speaches backend:**
+**Check whisper-stt backend:**
 ```bash
 curl -fsS http://localhost:8000/health
 ```
@@ -223,10 +223,10 @@ nc -zv wyoming-openai 10210
 
 **Check Piper voice installed:**
 ```bash
-docker exec hassistant_v2_speaches ls /app/voices/
+docker exec hassistant_v2_piper_main ls /config
 ```
 
-Should show `en_US-lessac-medium.onnx`
+Should show `en_US-glados-medium.onnx`
 
 ### Memory not recalling
 
@@ -282,7 +282,7 @@ curl -X POST http://localhost:8010/config \
     │            │             │
     ▼            ▼             ▼
 ┌────────┐   ┌────────┐   ┌────────┐
-│Speaches│   │ Orch.  │   │Speaches│
+│Whisper STT│   │ Orch.  │   │Whisper STT│
 │Whisper │   │/v1/chat│   │ Piper  │
 │ CUDA   │   │:8020   │   │GLaDOS  │
 └────────┘   └───┬────┘   └────────┘
@@ -314,4 +314,4 @@ Memory retrieval adds ~50-100ms (negligible with caching).
 
 - [Memory System](./MEMORY.md) - Memory architecture and API
 - [Router](../ha_config/packages/router.yaml) - Intelligent model selection
-- [Speech Stack](../ha_config/packages/speaches.yaml) - STT/TTS configuration
+- [Speech Stack](../ha_config/packages/speech.yaml) - STT/TTS configuration

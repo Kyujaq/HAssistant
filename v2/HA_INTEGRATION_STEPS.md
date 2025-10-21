@@ -7,7 +7,7 @@ Complete these steps in the Home Assistant UI to finish Step 1 green-light check
 ## Prerequisites
 
 ✅ Speaches stack running and healthy
-✅ HA monitoring package created (`ha_config/packages/speaches.yaml`)
+✅ HA monitoring package created (`ha_config/packages/speech.yaml`)
 ✅ Wyoming endpoints exposed:
   - STT: Port 10300 (TCP)
   - TTS: Port 10210 (TCP)
@@ -16,7 +16,7 @@ Complete these steps in the Home Assistant UI to finish Step 1 green-light check
 
 ## Step 1: Restart Home Assistant
 
-The `speaches.yaml` package was just added. Restart HA to load it:
+The `speech.yaml` package was just added. Restart HA to load it:
 
 ```
 Settings → System → Restart Home Assistant
@@ -34,16 +34,18 @@ After restart, check that new entities appear:
 Settings → Devices & Services → Entities
 ```
 
-Search for "speaches" - you should see:
-- ✅ `sensor.speaches_health`
-- ✅ `sensor.speaches_stt_latency`
-- ✅ `sensor.speaches_tts_latency`
-- ✅ `switch.speaches_use_fallback_tts`
+Search for "whisper" - you should see:
+- ✅ `sensor.whisper_stt_health`
+- ✅ `sensor.whisper_stt_latency`
+
+Search for "wyoming" - confirm:
+- ✅ `binary_sensor.wyoming_proxy_health`
+- ✅ `switch.tts_fallback_wyoming_piper`
 
 **Troubleshooting:**
 - If entities don't appear, check HA logs: `Settings → System → Logs`
-- Common issue: Wrong hostname (should be `hassistant_v2_speaches` if HA is on `assistant_default` network)
-- If HA can't reach speaches, use host IP instead: `192.168.2.13:8000`
+- Common issue: Wrong hostname (should be `hassistant_v2_whisper_stt` if HA is on `assistant_default` network)
+- If HA can't reach whisper-stt, use host IP instead: `192.168.2.13:8000`
 
 ---
 
@@ -119,11 +121,10 @@ Settings → Voice Assistants → Assist
    - **Acceptable**: < 700ms (if HA forces WAV conversion)
 
 4. **Check monitoring:**
-   ```
-   Developer Tools → States
-   ```
-   - Check `sensor.speaches_stt_latency` value
-   - Check `sensor.speaches_tts_latency` value
+  ```
+  Developer Tools → States
+  ```
+  - Check `sensor.whisper_stt_latency` value
 
 ---
 
@@ -135,10 +136,10 @@ Add monitoring card to a dashboard:
 type: entities
 title: Speech Stack Monitor
 entities:
-  - entity: sensor.speaches_health
-  - entity: sensor.speaches_stt_latency
-  - entity: sensor.speaches_tts_latency
-  - entity: switch.speaches_use_fallback_tts
+  - entity: sensor.whisper_stt_health
+  - entity: sensor.whisper_stt_latency
+  - entity: binary_sensor.wyoming_proxy_health
+  - entity: switch.tts_fallback_wyoming_piper
 ```
 
 Or use History Graph for latency trends:
@@ -147,8 +148,7 @@ Or use History Graph for latency trends:
 type: history-graph
 title: Speech Latency
 entities:
-  - entity: sensor.speaches_stt_latency
-  - entity: sensor.speaches_tts_latency
+  - entity: sensor.whisper_stt_latency
 hours_to_show: 24
 refresh_interval: 30
 ```
@@ -159,11 +159,11 @@ refresh_interval: 30
 
 ### Wyoming integration fails to connect
 
-**Check network connectivity:**
+**Check network connectivity (Wyoming uses raw TCP, so use netcat):**
 ```bash
 # From HA container or host:
-curl http://192.168.2.13:10300
-curl http://192.168.2.13:10210
+nc -zv 192.168.2.13 10300
+nc -zv 192.168.2.13 10210
 ```
 
 **Check Wyoming proxy is healthy:**
@@ -175,22 +175,24 @@ curl http://192.168.2.13:8080/healthz
 ```json
 {
   "ok": true,
-  "asr": "http://speaches:8000/v1/audio/transcriptions",
-  "tts": "http://speaches:8000/v1/audio/speech",
+  "asr": "http://whisper-stt:8000/v1/audio/transcriptions",
+  "tts": "tcp://piper-main:10200",
+  "primary_tts_host": "piper-main",
+  "primary_tts_port": 10200,
   ...
 }
 ```
 
 ### Sensors show "unavailable"
 
-**Check HA can reach speaches:**
+**Check HA can reach whisper-stt:**
 ```bash
 # From HA container:
-curl http://hassistant_v2_speaches:8000/health
+curl http://hassistant_v2_whisper_stt:8000/health
 ```
 
-If fails, update `/ha_config/packages/speaches.yaml`:
-- Replace `hassistant_v2_speaches` with `192.168.2.13`
+If fails, update `/ha_config/packages/speech.yaml`:
+- Replace `hassistant_v2_whisper-stt` with `192.168.2.13`
 - Restart HA
 
 ### High latency (> 1 second)
@@ -201,7 +203,7 @@ nvidia-smi
 # Should show python3.9 process on GPU1
 ```
 
-**Check speaches health:**
+**Check whisper-stt health:**
 ```bash
 curl http://192.168.2.13:8000/health
 ```
@@ -214,18 +216,18 @@ If shows `"device": "cpu"`, GPU isn't working - check driver/CUDA setup.
 
 **Check Piper voice files**
 ```
-docker exec -it hassistant_v2_speaches ls /app/voices
+docker exec -it hassistant_v2_piper_main ls /config
 ```
-Ensure the desired `*.onnx` + `.onnx.json` voice pair exists (default: `en_US-lessac-medium`).
+Ensure the desired `*.onnx` + `.onnx.json` voice pair exists (default: `en_US-glados-medium`).
 
 **Force container reload after updating voices**
 ```
-docker compose -f v2/docker-compose.yml restart speaches
+docker compose -f v2/docker-compose.yml restart piper-main
 ```
 
 **Adjust speaking cadence (optional)**
-- Set `PIPER_LENGTH_SCALE` env var (e.g. `0.9` faster, `1.1` slower)
-- Restart `speaches` afterwards
+- Set `PIPER_LENGTH` env var (e.g. `0.9` faster, `1.1` slower)
+- Restart `piper-main` afterwards
 
 ---
 
@@ -233,10 +235,10 @@ docker compose -f v2/docker-compose.yml restart speaches
 
 After completing these steps, verify:
 
-- ✅ `docker compose up -d` speaches healthy
+- ✅ `docker compose up -d` speech stack healthy (`whisper-stt`, `piper-main`, `wyoming_openai`)
 - ✅ `nvidia-smi` shows GPU load on STT
 - ✅ `smoke_tts_stream.sh` passes (L16 header)
-- ✅ HA shows: Speaches Health, STT Latency, TTS Latency, Fallback switch
+- ✅ HA shows: Whisper STT Health, STT Latency, `binary_sensor.wyoming_proxy_health`, `switch.tts_fallback_wyoming_piper`
 - ✅ Long paragraph via HA < 500ms first-chunk latency
 
 **Document results in:** `v2/STEP1_COMPLETE.md`

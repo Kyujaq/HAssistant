@@ -2,10 +2,9 @@
 # Port Allocation:
 #   - 11434: ollama-chat (Hermes3 + Qwen3-4B)
 #   - 10300: wyoming_openai STT (Wyoming facade)
-#   - 10210: wyoming_openai TTS (proxy to speaches; avoids conflict with native piper)
+#   - 10210: wyoming_openai TTS (proxy to Piper; avoids conflict with native piper)
 #   - 10200: wyoming-piper (native fallback TTS for A/B testing)
-#   - 8000:  speaches (OpenAI-compatible STT/TTS backend)
-#   - 8080:  wyoming_openai HTTP healthcheck/config API
+#   - 8085:  wyoming_openai HTTP healthcheck/config API
 #
 # IMPORTANT: Verify GPU indices with `nvidia-smi --query-gpu=index,name --format=csv`
 #            Update NVIDIA_VISIBLE_DEVICES if your GPU1 has a different index
@@ -62,32 +61,68 @@ services:
       default:
         aliases: ["ollama-vl"]
 
-  # Speaches - OpenAI-compatible STT (faster-whisper CUDA) + Piper TTS
-  speaches:
-    build:
-      context: ./services/speaches
-    container_name: hassistant_v2_speaches
-    environment:
-      - USE_CUDA=0                                           # CPU mode (CUDA 11.4/cuDNN8 incompatible with faster-whisper)
-      - WHISPER_MODEL=${WHISPER_MODEL:-base.en}             # base.en (fast) or small.en (better)
-      - PIPER_VOICE=${PIPER_VOICE:-en_US-lessac-medium}     # GLaDOS-style voice
-      - SAMPLE_RATE=${SAMPLE_RATE:-22050}                   # Piper output sample rate
-      - PIPER_LENGTH_SCALE=${PIPER_LENGTH_SCALE:-}          # Optional cadence tuning
-    ports:
-      - "8000:8000"
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: hassistant_v2_tailscale
+    hostname: ${TAILSCALE_HOSTNAME:-hassistant-v2}
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
     volumes:
-      - piper_voices:/app/voices        # Pre-downloaded voice models
-      - speaches_cache:/root/.cache     # Whisper & Piper model cache
+      - tailscale_state:/var/lib/tailscale
+      - tailscale_run:/var/run/tailscale
+    environment:
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SOCKET=/var/run/tailscale/tailscaled.sock
+    command:
+      - tailscaled
+      - --state=/var/lib/tailscale/tailscaled.state
+      - --socket=/var/run/tailscale/tailscaled.sock
+      - --tun=tsdev0
+  
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: hassistant_v2_mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"   # MQTT broker port
+      - "9001:9001"   # WebSocket (optional)
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    networks:
+      default:
+        aliases: ["mosquitto"]
+
+  whisper-stt:
+    build:
+      context: ./services/whisper_stt
+    container_name: hassistant_v2_whisper_stt
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=0
+      - USE_CUDA=1
+      - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
+      - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8_float16}
+      - WHISPER_BEAM_SIZE=${WHISPER_BEAM_SIZE:-5}
+      - WHISPER_VAD_FILTER=${WHISPER_VAD_FILTER:-1}
+    volumes:
+      - whisper_cache:/root/.cache
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s  # Longer start period for model loading
+      start_period: 45s
     restart: on-failure:3
     networks:
       default:
-        aliases: ["speaches"]
+        aliases: ["whisper-stt"]
 
   # Wyoming OpenAI proxy - bridges Wyoming protocol to Speaches OpenAI endpoints
   wyoming_openai:
@@ -95,17 +130,20 @@ services:
       context: ./services/wyoming_openai
     container_name: hassistant_v2_wyoming_proxy
     environment:
-      - ASR_URL=http://speaches:8000/v1/audio/transcriptions
-      - TTS_URL=http://speaches:8000/v1/audio/speech
+      - ASR_URL=http://whisper-stt:8000/v1/audio/transcriptions
+      - PRIMARY_TTS_HOST=${PRIMARY_TTS_HOST:-piper-main}
+      - PRIMARY_TTS_PORT=${PRIMARY_TTS_PORT:-10200}
       - FALLBACK_TTS_HOST=wyoming-piper
       - FALLBACK_TTS_PORT=10200
       - FALLBACK_TTS_URL=${FALLBACK_TTS_URL:-}
     ports:
       - "10300:10300"  # Wyoming STT (TCP bridge to Speaches)
       - "10210:10210"  # Wyoming TTS (TCP bridge to Speaches)
-      - "8080:8080"    # HTTP healthcheck/config API
+      - "8085:8080"    # HTTP healthcheck/config API
     depends_on:
-      speaches:
+      whisper-stt:
+        condition: service_healthy
+      piper-main:
         condition: service_healthy
       wyoming-piper:
         condition: service_healthy
@@ -120,16 +158,49 @@ services:
       default:
         aliases: ["wyoming-openai", "wyoming_openai"]
 
+  piper-main:
+    image: lscr.io/linuxserver/piper:gpu
+    container_name: hassistant_v2_piper_main
+    runtime: nvidia
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-Etc/UTC}
+      - PIPER_VOICE=${PIPER_VOICE:-en_US-glados-medium}
+      - PIPER_LENGTH=${PIPER_LENGTH:-1.0}
+      - PIPER_NOISE=${PIPER_NOISE:-0.667}
+      - PIPER_NOISEW=${PIPER_NOISEW:-0.8}
+      - PIPER_SPEAKER=${PIPER_SPEAKER:-0}
+      - PIPER_PROCS=${PIPER_PROCS:-1}
+      - NVIDIA_VISIBLE_DEVICES=all
+    volumes:
+      - ./services/piper_data:/config
+      - ./services/piper_data/custom-cont-init.d:/custom-cont-init.d
+    ports:
+      - "10200:10200"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/10200' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      default:
+        aliases: ["piper-main", "piper"]
+
   # Wyoming Piper - native TTS fallback for A/B testing (CPU for reliability)
   wyoming-piper:
     image: rhasspy/wyoming-piper:latest
     container_name: hassistant_v2_piper_fallback
-    command: --voice en_US-lessac-medium --data-dir /data --download-dir /data
+    command: --voice en_US-glados-medium --data-dir /data --download-dir /data --streaming
     # No GPU - CPU fallback is more reliable for Piper ONNX
     ports:
       - "10200:10200"
     volumes:
-      - piper_data:/data
+      - ./services/piper_data:/data
+      - ./services/piper_data/voices.json:/app/lib/python3.10/dist-packages/wyoming_piper/voices.json
+      - ./services/piper_data/voices.json:/usr/local/lib/python3.11/dist-packages/wyoming_piper/voices.json
     healthcheck:
       test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/10200' || exit 1"]
       interval: 30s
@@ -231,24 +302,33 @@ services:
       - VL_TEXT_ENABLED=1                         # Enable VL for text (HA toggle)
       - VL_STICKY_TURNS_MIN=5                     # Sticky sessions on VL
       - VL_TEXT_TOKEN_LIMIT=768                   # Cap VL text tokens
+      - VISION_ROUTER_URL=${VISION_ROUTER_URL:-http://192.168.122.71:8050}
+      - VISION_GATEWAY_URL=${VISION_GATEWAY_URL:-http://192.168.122.71:8051}
+      - HA_BASE_URL=${HA_BASE_URL:-http://assistant-ha:8123}
+      - HA_TOKEN=${HA_TOKEN:-}
       # Memory configuration
       - MEMORY_URL=http://letta-bridge:8010
       - LETTABRIDGE_URL=http://letta-bridge:8010
       - MEMORY_AUTOSAVE_ON=1
       - MEMORY_TOP_K=6
-      - MEMORY_MIN_SCORE=0.62
+      - MEMORY_MIN_SCORE=0.5
       - MEMORY_MAX_CTX_CHARS=1200
       - MEMORY_DURABLE_THRESHOLD=80
       - MEMORY_CACHE_SIZE=50
       - MEMORY_CONNECT_TIMEOUT=2.0
       - MEMORY_READ_TIMEOUT=6.0
+      # Realtime configuration
+      - ENABLE_REALTIME_STREAMING=${ENABLE_REALTIME_STREAMING:-0}
+      - REALTIME_CONNECT_TIMEOUT=${REALTIME_CONNECT_TIMEOUT:-2.0}
+      - REALTIME_READ_TIMEOUT=${REALTIME_READ_TIMEOUT:-30.0}
+      - REALTIME_SESSION_TTL=${REALTIME_SESSION_TTL:-30.0}
     depends_on:
       ollama-text: { condition: service_healthy }
       ollama-vl: { condition: service_healthy }
       letta-bridge: { condition: service_healthy }
       memory-embed: { condition: service_healthy }
     ports:
-      - "8020:8020"
+      - "8021:8020"
     volumes:
       - orch_state:/app/state
     healthcheck:
@@ -297,17 +377,39 @@ services:
       default:
         aliases: ["dozzle"]
 
+  # NVIDIA GPU stats to Home Assistant via MQTT
+  smi2mqtt:
+    build:
+      context: ./services/smi2mqtt/smi2mqtt
+    container_name: hassistant_v2_smi2mqtt
+    environment:
+      - TZ=EST
+    volumes:
+      - ./services/smi2mqtt/data:/opt/smi2mqtt
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
 volumes:
   ollama_text_data:
     name: hassistant_v2_ollama_text_data
   ollama_vl_data:
     name: hassistant_v2_ollama_vl_data
-  piper_voices:
+  voices:
     name: hassistant_v2_piper_voices
   piper_data:
     name: hassistant_v2_piper_data
-  speaches_cache:
-    name: hassistant_v2_speaches_cache  # Critical: caches Whisper & Piper models
+  whisper_cache:
+    name: hassistant_v2_whisper_cache
+  tailscale_state:
+    name: hassistant_v2_tailscale_state
+  tailscale_run:
+    name: hassistant_v2_tailscale_run
   pgdata:
     name: hassistant_v2_pgdata
   memembed_cache:
@@ -335,3 +437,4 @@ networks:
   default:
     name: hassistant_v2_default
     external: true
+

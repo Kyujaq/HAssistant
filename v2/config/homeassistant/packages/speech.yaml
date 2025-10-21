@@ -2,43 +2,26 @@ homeassistant: {}
 
 sensor:
   - platform: rest
-    name: Speaches Health
-    resource: http://speaches:8000/health
+    name: Whisper STT Health
+    resource: http://whisper-stt:8000/health
     value_template: "{{ value_json.ok }}"
     json_attributes:
+      - model
       - device
-      - whisper_model
-      - piper_voice
-      - tts_voice
-      - sample_rate
-      - tts_status
+      - compute_type
+      - vad_filter
+      - beam_size
     scan_interval: 30
 
   - platform: rest
-    name: Speaches STT Latency
-    resource: http://speaches:8000/metrics
+    name: Whisper STT Latency
+    resource: http://whisper-stt:8000/metrics
     value_template: >
       {% set sum = 0.0 %}{% set cnt = 0.0 %}
       {% for line in value.split('\n') %}
-        {% if line.startswith('speaches_latency_seconds_sum{route="stt"}') %}
+        {% if line.startswith('whisper_stt_latency_seconds_sum') %}
           {% set sum = line.split(' ')[1] | float %}
-        {% elif line.startswith('speaches_latency_seconds_count{route="stt"}') %}
-          {% set cnt = line.split(' ')[1] | float %}
-        {% endif %}
-      {% endfor %}
-      {{ (sum / (cnt if cnt > 0 else 1)) | round(3) }}
-    unit_of_measurement: s
-    scan_interval: 30
-
-  - platform: rest
-    name: Speaches TTS Latency
-    resource: http://speaches:8000/metrics
-    value_template: >
-      {% set sum = 0.0 %}{% set cnt = 0.0 %}
-      {% for line in value.split('\n') %}
-        {% if line.startswith('speaches_latency_seconds_sum{route="tts"}') %}
-          {% set sum = line.split(' ')[1] | float %}
-        {% elif line.startswith('speaches_latency_seconds_count{route="tts"}') %}
+        {% elif line.startswith('whisper_stt_latency_seconds_count') %}
           {% set cnt = line.split(' ')[1] | float %}
         {% endif %}
       {% endfor %}

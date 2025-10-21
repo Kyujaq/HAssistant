@@ -14,7 +14,8 @@ HAssistant v2 streaming speech stack is operational with GPU-accelerated STT, Wy
 | Service | Status | Port | GPU | Purpose |
 |---------|--------|------|-----|---------|
 | `ollama-chat` | ✅ Running | 11434 | GPU1* | Hermes3 + Qwen3:4b models |
-| `speaches` | ✅ Healthy | 8000 | GPU1 (1080 Ti) | GPU STT (faster-whisper) + Piper TTS |
+| `whisper-stt` | ✅ Healthy | 8000 | GPU1 (1080 Ti) | GPU STT (Faster-Whisper) |
+| `piper-main` | ✅ Healthy | 10200 | GPU1 (1080 Ti) | Primary Piper TTS (Wyoming) |
 | `wyoming_openai` | ✅ Healthy | 10300, 10210, 8080 | - | Wyoming→OpenAI protocol bridge |
 | `wyoming-piper` | ✅ Healthy | 10200 | - | Fallback TTS (CPU, reliable) |
 
@@ -44,7 +45,7 @@ hermes3:latest    4f6b83f30b62    4.7 GB    Loaded
 
 **GPU Assignments:**
 - **GPU0 (GTX 1070)**: Available for ollama vision tasks
-- **GPU1 (GTX 1080 Ti)**: Speaches STT (232 MiB in use)
+- **GPU1 (GTX 1080 Ti)**: whisper-stt + piper-main (GPU speech pipeline)
 - **GPU2/3 (K80s)**: On VM at 192.168.122.71 (future vision integration)
 
 **Performance:**
@@ -65,14 +66,14 @@ hermes3:latest    4f6b83f30b62    4.7 GB    Loaded
 
 2. **`smoke_proxy_routes.sh`**: ✅ PASS
    ```
-   Speaches health: OK
+   whisper-stt health: OK
    Wyoming proxy health: OK (port 8080)
    ```
 
 3. **GPU Verification**: ✅ PASS
    ```
-   nvidia-smi: python3.9 process using GPU1 (232 MiB)
-   Speaches reports: "device": "cuda"
+   nvidia-smi: whisper-stt container using GPU1
+   whisper-stt reports: "device": "cuda"
    ```
 
 ---
@@ -82,9 +83,9 @@ hermes3:latest    4f6b83f30b62    4.7 GB    Loaded
 ### Current Limitations
 
 1. **Piper Voice Management**
-   - Speaches now streams Piper audio; ensure desired `.onnx` voices live in `piper_voices`
+   - `piper-main` now streams Piper audio; ensure desired `.onnx` voices live in `services/piper_data`
    - Add additional voices as needed and restart the container to pick them up
-   - Tune speaking rate with `PIPER_LENGTH_SCALE` if the default cadence feels off
+   - Tune speaking rate with `PIPER_LENGTH` if the default cadence feels off
 
 2. **Ollama Healthcheck Issue**
    - Docker healthcheck reports "unhealthy" despite API working
@@ -105,7 +106,7 @@ hermes3:latest    4f6b83f30b62    4.7 GB    Loaded
 
 ✅ **Wyoming at the edges** - HA/clients use Wyoming protocol
 ✅ **GPU STT** - faster-whisper on GPU1 (int8)
-✅ **Streaming ready** - Proxy infrastructure in place (TTS needs Piper integration)
+✅ **Streaming ready** - Proxy infrastructure in place via whisper-stt + piper-main
 ✅ **Fallback path** - Native wyoming-piper at 10200
 ✅ **Healthchecks** - All services have health endpoints
 ✅ **GPU pinning** - NVIDIA_VISIBLE_DEVICES working with driver 535
@@ -122,9 +123,9 @@ docker compose -f v2/docker-compose.yml up -d
 ### Check Services
 ```bash
 docker compose -f v2/docker-compose.yml ps
-curl http://localhost:8000/health       # Speaches
+curl http://localhost:8000/health       # Whisper STT
 curl http://localhost:11434/api/tags    # Ollama
-curl http://localhost:8080/healthz      # Wyoming proxy
+curl http://localhost:8085/healthz      # Wyoming proxy
 ```
 
 ### Monitor GPU
@@ -153,14 +154,12 @@ v2/
 │   ├── smoke_proxy_routes.sh   # ✅ Passed
 │   └── latency_streaming.md    # Manual test instructions
 ├── services/
-│   ├── speaches/               # GPU STT + Piper TTS
-│   │   ├── Dockerfile          # CUDA 11.4 + ffmpeg + onnxruntime
-│   │   ├── requirements.txt    # faster-whisper, fastapi, prometheus
-│   │   └── server.py           # OpenAI-compatible endpoints
-│   └── wyoming_openai/         # Wyoming protocol bridge
+│   ├── whisper_stt/            # GPU Faster-Whisper STT service
+│   ├── piper_data/             # Piper voices/configuration
+│   └── wyoming_openai/         # Wyoming protocol bridge (Whisper/Piper)
 │       ├── Dockerfile
 │       ├── requirements.txt
-│       └── main.py             # Wyoming→Speaches routing
+│       └── main.py             # Wyoming routing
 └── STEP1_COMPLETE.md           # This file
 ```
 
@@ -170,8 +169,8 @@ v2/
 
 | # | Requirement | Status | Details |
 |---|-------------|--------|---------|
-| 1 | `docker compose up -d` speaches healthy | ✅ PASS | All services running, speaches reports healthy |
-| 2 | `nvidia-smi` shows GPU-1 load on STT | ✅ PASS | GTX 1080 Ti (GPU1) shows 232 MiB python3.9 |
+| 1 | `docker compose up -d` speech stack healthy | ✅ PASS | whisper-stt, piper-main, wyoming proxy all green |
+| 2 | `nvidia-smi` shows GPU-1 load on STT | ✅ PASS | GTX 1080 Ti (GPU1) shows whisper-stt utilizing CUDA |
 | 3 | `smoke_tts_stream.sh` passes (L16 header) | ✅ PASS | Returns `audio/L16; rate=22050; channels=1`, `X-TTS-Status: piper` |
 | 4 | HA shows monitoring (4 entities) | ⚠️  PENDING | Package created, needs HA restart |
 | 5 | Long paragraph < 500ms first-chunk | ⚠️  PENDING | Requires HA Wyoming integration |

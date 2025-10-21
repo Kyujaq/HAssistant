@@ -1,0 +1,29 @@
+{
+  "en_US-glados-medium": {
+    "key": "en_US-glados-medium",
+    "name": "glados",
+    "quality": "medium",
+    "language": {
+      "code": "en_US",
+      "family": "en",
+      "name_native": "English (US)",
+      "name_english": "English",
+      "country_english": "United States"
+    },
+    "num_speakers": 1,
+    "speaker_id_map": {},
+    "files": {
+      "en_US-glados-medium.onnx": {
+        "size_bytes": 63511038,
+        "md5_digest": "a06f8b65ee1e4bf2dfcb0a80b560deeb"
+      },
+      "en_US-glados-medium.onnx.json": {
+        "size_bytes": 7103,
+        "md5_digest": "da3df3ba34d9515be5918195d6b3c58c"
+      }
+    },
+    "aliases": [
+      "en_US-glados-high"
+    ]
+  }
+}
