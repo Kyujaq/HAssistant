@@ -34,9 +34,30 @@ FALLBACK_TTS_PORT = int(os.getenv("FALLBACK_TTS_PORT", "10200"))
 FALLBACK_TTS_URL = os.getenv("FALLBACK_TTS_URL", "")
 SAMPLE_RATE = 22050
 CHUNK_SIZE = 8192  # 8KB chunks for streaming
+SENTENCE_STREAM_ENABLED = os.getenv("ENABLE_SENTENCE_STREAMING", "1") == "1"
+SENTENCE_FLUSH_MARKERS = tuple(os.getenv("SENTENCE_FLUSH_MARKERS", ".?!\n"))
 
 _fallback_lock = asyncio.Lock()
 tts_fallback_enabled = False  # guarded by _fallback_lock
+
+
+def _split_into_sentences(text: str) -> list[str]:
+    sentences: list[str] = []
+    if not text:
+        return sentences
+    buffer: list[str] = []
+    for ch in text:
+        buffer.append(ch)
+        if ch in SENTENCE_FLUSH_MARKERS:
+            sentence = "".join(buffer).strip()
+            if sentence:
+                sentences.append(sentence)
+            buffer = []
+    if buffer:
+        sentence = "".join(buffer).strip()
+        if sentence:
+            sentences.append(sentence)
+    return sentences
 
 # Servers
 stt_server: Optional[AsyncServer] = None
@@ -192,12 +213,7 @@ class PiperTTSHandler(AsyncEventHandler):
                 logger.info("[TTS] Fallback mode enabled")
                 await self._synthesize_with_fallback(text, voice)
             else:
-                await self._stream_from_wyoming(
-                    PRIMARY_TTS_HOST,
-                    PRIMARY_TTS_PORT,
-                    text,
-                    voice,
-                )
+                await self._stream_text(text, voice)
             logger.info("[TTS] Synthesis complete")
         except Exception as e:
             logger.warning(f"[TTS] Primary synthesis failed: {e}")
@@ -292,6 +308,9 @@ class PiperTTSHandler(AsyncEventHandler):
         port: int,
         text: str,
         voice: Optional[Union[str, SynthesizeVoice]],
+        *,
+        send_start: bool = True,
+        send_stop: bool = True,
     ) -> None:
         synth_voice = self._to_synthesize_voice(voice)
         logger.info(f"[TTS] Streaming via Wyoming {host}:{port} (voice={synth_voice})")
@@ -310,13 +329,14 @@ class PiperTTSHandler(AsyncEventHandler):
 
                 if AudioStart.is_type(event.type):
                     audio_start = AudioStart.from_event(event)
-                    await self.write_event(
-                        AudioStart(
-                            rate=audio_start.rate,
-                            width=audio_start.width,
-                            channels=audio_start.channels,
-                        ).event()
-                    )
+                    if send_start and not started:
+                        await self.write_event(
+                            AudioStart(
+                                rate=audio_start.rate,
+                                width=audio_start.width,
+                                channels=audio_start.channels,
+                            ).event()
+                        )
                     started = True
                     continue
 
@@ -333,7 +353,8 @@ class PiperTTSHandler(AsyncEventHandler):
                     continue
 
                 if AudioStop.is_type(event.type):
-                    await self.write_event(AudioStop().event())
+                    if send_stop and started:
+                        await self.write_event(AudioStop().event())
                     started = False
                     break
 
@@ -341,8 +362,41 @@ class PiperTTSHandler(AsyncEventHandler):
                     err = Error.from_event(event)
                     raise RuntimeError(err.text)
 
-            if started:
+            if started and send_stop:
                 await self.write_event(AudioStop().event())
+
+    async def _stream_text(
+        self,
+        text: str,
+        voice: Optional[Union[str, SynthesizeVoice]],
+    ) -> None:
+        if not SENTENCE_STREAM_ENABLED:
+            await self._stream_from_wyoming(
+                PRIMARY_TTS_HOST,
+                PRIMARY_TTS_PORT,
+                text,
+                voice,
+            )
+            return
+
+        sentences = _split_into_sentences(text)
+        if not sentences:
+            return
+
+        nonempty = [s for s in sentences if s.strip()]
+        if not nonempty:
+            return
+
+        total = len(nonempty)
+        for idx, sentence in enumerate(nonempty):
+            await self._stream_from_wyoming(
+                PRIMARY_TTS_HOST,
+                PRIMARY_TTS_PORT,
+                sentence,
+                voice,
+                send_start=(idx == 0),
+                send_stop=(idx == total - 1),
+            )
 
     async def _synthesize_with_fallback(
         self,
