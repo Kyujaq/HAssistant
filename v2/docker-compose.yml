@@ -133,9 +133,9 @@ services:
       - ASR_URL=http://whisper-stt:8000/v1/audio/transcriptions
       - PRIMARY_TTS_HOST=${PRIMARY_TTS_HOST:-piper-main}
       - PRIMARY_TTS_PORT=${PRIMARY_TTS_PORT:-10200}
-      - FALLBACK_TTS_HOST=wyoming-piper
-      - FALLBACK_TTS_PORT=10200
-      - FALLBACK_TTS_URL=${FALLBACK_TTS_URL:-}
+      #- FALLBACK_TTS_HOST=wyoming-piper
+      #- FALLBACK_TTS_PORT=10200
+      #- FALLBACK_TTS_URL=${FALLBACK_TTS_URL:-}
     ports:
       - "10300:10300"  # Wyoming STT (TCP bridge to Speaches)
       - "10210:10210"  # Wyoming TTS (TCP bridge to Speaches)
@@ -145,8 +145,8 @@ services:
         condition: service_healthy
       piper-main:
         condition: service_healthy
-      wyoming-piper:
-        condition: service_healthy
+    #  wyoming-piper:
+     #   condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
       interval: 30s
@@ -190,27 +190,27 @@ services:
         aliases: ["piper-main", "piper"]
 
   # Wyoming Piper - native TTS fallback for A/B testing (CPU for reliability)
-  wyoming-piper:
-    image: rhasspy/wyoming-piper:latest
-    container_name: hassistant_v2_piper_fallback
-    command: --voice en_US-glados-medium --data-dir /data --download-dir /data --streaming
-    # No GPU - CPU fallback is more reliable for Piper ONNX
-    ports:
-      - "10200:10200"
-    volumes:
-      - ./services/piper_data:/data
-      - ./services/piper_data/voices.json:/app/lib/python3.10/dist-packages/wyoming_piper/voices.json
-      - ./services/piper_data/voices.json:/usr/local/lib/python3.11/dist-packages/wyoming_piper/voices.json
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/10200' || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    restart: on-failure:3
-    networks:
-      default:
-        aliases: ["wyoming-piper"]
+  # wyoming-piper:
+  #   image: rhasspy/wyoming-piper:latest
+  #   container_name: hassistant_v2_piper_fallback
+  #   command: --voice en_US-glados-medium --data-dir /data --download-dir /data --streaming
+  #   # No GPU - CPU fallback is more reliable for Piper ONNX
+  #   ports:
+  #     - "10200:10200"
+  #   volumes:
+  #     - ./services/piper_data:/data
+  #     - ./services/piper_data/voices.json:/app/lib/python3.10/dist-packages/wyoming_piper/voices.json
+  #     - ./services/piper_data/voices.json:/usr/local/lib/python3.11/dist-packages/wyoming_piper/voices.json
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/10200' || exit 1"]
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 30s
+  #   restart: on-failure:3
+  #   networks:
+  #     default:
+  #       aliases: ["wyoming-piper"]
 
   mediamtx:
     image: bluenviron/mediamtx:latest

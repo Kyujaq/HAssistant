@@ -1,12 +1,14 @@
 import asyncio
 import logging
 import os
+import json
 import time
 import uuid
-from typing import Any, Dict, List
+from collections import deque
+from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import Body, FastAPI
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -17,14 +19,7 @@ from prometheus_client import (
 )
 
 from scoring import compute_usefulness
-
-try:
-    import pynvml
-
-    pynvml.nvmlInit()
-    _NVML_AVAILABLE = True
-except Exception:
-    _NVML_AVAILABLE = False
+from common.gpu_stats import nvml_available, snapshot_gpus
 
 ORCH = os.getenv("ORCHESTRATOR_URL", "http://orchestrator:8020")
 VL_GATEWAY = os.getenv("VL_GATEWAY_URL", "http://orchestrator:8020")
@@ -42,19 +37,29 @@ QUEUE_G = Gauge("vision_pending_jobs", "pending escalations")
 HEALTH_G = Gauge("vision_health", "1 if healthy")
 CONFIG_G = Gauge("vision_config_state", "configuration flags", ["key"])
 SKIP_TOTAL = Counter("vision_events_skipped_total", "events skipped due to configuration", ["reason"])
+VL_FAILOVER_TOTAL = Counter("vision_vl_failovers_total", "VL escalation failures")
+ANALYZE_TOTAL = Counter("vision_analyze_requests_total", "ad-hoc analyze requests", ["source"])
 GPU_UTIL_G = Gauge("vision_gpu_util_percent", "GPU utilization percent", ["index"])
 GPU_MEM_FREE_G = Gauge("vision_gpu_mem_free_gb", "GPU free memory (GB)", ["index"])
 
+FRIGATE_EVENTS = Counter("frigate_events_seen_total", "Frigate events seen by router")
+FRIGATE_SNAPS = Counter("frigate_snapshots_fetched_total", "Snapshots attached to Frigate events")
+
+# State
 pending_jobs = 0
 lock_held = False
 total_events = 0
 total_escalations = 0
+_gpu_cache: Dict[str, Any] = {"gpus": [], "last_update": 0.0}
+_gpu_util_history: deque = deque(maxlen=12)  # ~60s history at 5s intervals
+_threshold_adjusted_at = 0.0
 
 config: Dict[str, Any] = {
     "vision_on": True,
     "screen_watch_on": True,
     "threshold": THRESH,
     "max_frames": MAX_FRAMES,
+    "escalate_vl": ESCL_ENABLED,
 }
 
 
@@ -63,35 +68,54 @@ def _update_config_metrics() -> None:
     CONFIG_G.labels("screen_watch_on").set(1.0 if config.get("screen_watch_on", True) else 0.0)
     CONFIG_G.labels("threshold").set(float(config.get("threshold", THRESH)))
     CONFIG_G.labels("max_frames").set(float(config.get("max_frames", MAX_FRAMES)))
+    CONFIG_G.labels("escalate_vl").set(1.0 if config.get("escalate_vl", ESCL_ENABLED) else 0.0)
 
 
 def _gpu_stats() -> Dict[str, Any]:
-    if not _NVML_AVAILABLE:
-        return {"gpus": []}
+    """Return cached GPU stats or refresh if stale (>3s)."""
+    now = time.time()
+    if now - _gpu_cache.get("last_update", 0.0) > 3.0:
+        gpus = snapshot_gpus() if nvml_available() else []
+        _gpu_cache["gpus"] = gpus
+        _gpu_cache["last_update"] = now
+        for gpu in gpus:
+            index = str(gpu.get("index", 0))
+            GPU_UTIL_G.labels(index=index).set(gpu.get("util", 0.0))
+            GPU_MEM_FREE_G.labels(index=index).set(gpu.get("mem_free_gb", 0.0))
+    return {"gpus": _gpu_cache.get("gpus", [])}
 
-    gpus: List[Dict[str, Any]] = []
-    try:
-        count = pynvml.nvmlDeviceGetCount()
-        for index in range(count):
-            handle = pynvml.nvmlDeviceGetHandleByIndex(index)
-            util = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
-            mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-            free_gb = mem_info.free / (1024**3)
-            total_gb = mem_info.total / (1024**3)
-            gpus.append(
-                {
-                    "index": index,
-                    "util": float(util),
-                    "mem_free_gb": round(free_gb, 2),
-                    "mem_total_gb": round(total_gb, 2),
-                }
-            )
-            GPU_UTIL_G.labels(index=str(index)).set(util)
-            GPU_MEM_FREE_G.labels(index=str(index)).set(free_gb)
-    except Exception:
-        return {"gpus": []}
 
-    return {"gpus": gpus}
+def _check_backpressure() -> None:
+    """Auto-adjust threshold if queue or GPU util is high."""
+    global _threshold_adjusted_at
+    now = time.time()
+
+    # Only check every 30s
+    if now - _threshold_adjusted_at < 30.0:
+        return
+
+    # Check queue depth
+    if pending_jobs > 5:
+        current = config.get("threshold", THRESH)
+        new_threshold = min(0.85, current + 0.1)
+        if new_threshold > current:
+            config["threshold"] = new_threshold
+            _update_config_metrics()
+            logger.warning(f"Backpressure: queue_depth={pending_jobs}, raised threshold {current:.2f} → {new_threshold:.2f}")
+            _threshold_adjusted_at = now
+            return
+
+    # Check GPU util history (need >85% for 60s)
+    if len(_gpu_util_history) >= 12:
+        avg_util = sum(_gpu_util_history) / len(_gpu_util_history)
+        if avg_util > 85.0:
+            current = config.get("threshold", THRESH)
+            new_threshold = min(0.85, current + 0.1)
+            if new_threshold > current:
+                config["threshold"] = new_threshold
+                _update_config_metrics()
+                logger.warning(f"Backpressure: avg_gpu_util={avg_util:.1f}%, raised threshold {current:.2f} → {new_threshold:.2f}")
+                _threshold_adjusted_at = now
 
 _update_config_metrics()
 
@@ -130,6 +154,8 @@ def set_config(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         config["threshold"] = float(payload["threshold"])
     if "max_frames" in payload:
         config["max_frames"] = max(1, int(payload["max_frames"]))
+    if "escalate_vl" in payload:
+        config["escalate_vl"] = bool(payload["escalate_vl"])
     _update_config_metrics()
     logger.info("Updated config: %s", config)
     return config
@@ -184,6 +210,7 @@ async def _escalate_to_vl(bundle: Dict[str, Any]) -> Dict[str, Any]:
             return response.json()
     except Exception as exc:
         ESC_LAT.observe((time.time() - start) * 1000)
+        VL_FAILOVER_TOTAL.inc()
         logger.warning("VL escalate failed: %s", exc)
         return {"error": str(exc)}
 
@@ -211,24 +238,57 @@ def _build_vl_bundle(event: Dict[str, Any], top_k: int) -> Dict[str, Any]:
 
 
 @app.post("/events")
-async def ingest_event(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
+async def ingest_event(
+    payload: Optional[Dict[str, Any]] = Body(default=None),
+    json_payload: Optional[str] = Form(default=None),
+    snapshot: Optional[UploadFile] = File(default=None),
+) -> JSONResponse:
     global pending_jobs, lock_held, total_events, total_escalations
-    source = payload.get("source", "unknown")
+
+    if json_payload is not None:
+        try:
+            event: Dict[str, Any] = json.loads(json_payload)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid form JSON: {exc}") from exc
+    else:
+        event = payload or {}
+
+    if not isinstance(event, dict) or not event:
+        raise HTTPException(status_code=400, detail="Event payload required")
+
+    source = event.get("source", "unknown")
+
+    if source == "frigate":
+        FRIGATE_EVENTS.inc()
+
+    snapshot_size = 0
+    if snapshot is not None:
+        FRIGATE_SNAPS.inc()
+        data = await snapshot.read()
+        snapshot_size = len(data)
+        meta = event.setdefault("meta", {})
+        meta.update(
+            {
+                "snapshot_size": snapshot_size,
+                "snapshot_filename": getattr(snapshot, "filename", None),
+                "snapshot_content_type": snapshot.content_type,
+            }
+        )
+    else:
+        event.setdefault("meta", {})
 
     if not config.get("vision_on", True):
         EVENTS_TOTAL.labels(source).inc()
         SKIP_TOTAL.labels(reason="vision_off").inc()
         total_events += 1
-        return JSONResponse(
-            {"id": str(uuid.uuid4()), "skipped": True, "reason": "vision_off"}
-        )
+        return JSONResponse({"id": str(uuid.uuid4()), "skipped": True, "reason": "vision_off"})
 
     EVENTS_TOTAL.labels(source).inc()
     total_events += 1
 
-    score = compute_usefulness(payload)
+    score = compute_usefulness(event)
     threshold = float(config.get("threshold", THRESH))
-    should_escalate = ESCL_ENABLED and score >= threshold
+    should_escalate = config.get("escalate_vl", ESCL_ENABLED) and score >= threshold
 
     if not config.get("screen_watch_on", True) and source.lower() == "screen":
         if should_escalate:
@@ -239,14 +299,14 @@ async def ingest_event(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
     unified = {
         "id": event_id,
         "source": source,
-        "ts": payload.get("ts"),
+        "ts": event.get("ts"),
         "score": round(score, 3),
         "escalated": should_escalate,
         "k80": {
-            "frames": payload.get("frames") or [],
-            "detections": payload.get("detections") or [],
-            "tags": payload.get("tags") or [],
-            "meta": payload.get("meta") or {},
+            "frames": event.get("frames") or [],
+            "detections": event.get("detections") or [],
+            "tags": event.get("tags") or [],
+            "meta": event.get("meta") or {},
         },
         "vl": None,
     }
@@ -254,13 +314,14 @@ async def ingest_event(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
     asyncio.create_task(_post_orchestrator(unified))
 
     if should_escalate:
+        _check_backpressure()
         if LOCK_ON_ESCALATE and not lock_held:
             await set_lock({"enabled": True})
         pending_jobs += 1
         QUEUE_G.set(pending_jobs)
         ESC_TOTAL.labels(reason="useful").inc()
         top_k = int(config.get("max_frames", MAX_FRAMES))
-        bundle = _build_vl_bundle(payload, top_k)
+        bundle = _build_vl_bundle(event, top_k)
         result = await _escalate_to_vl(bundle)
         total_escalations += 1
         pending_jobs = max(0, pending_jobs - 1)
@@ -274,10 +335,81 @@ async def ingest_event(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
     return JSONResponse({"id": event_id, "score": score, "escalated": bool(unified["vl"])})
 
 
+@app.post("/analyze")
+async def analyze_adhoc(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
+    """
+    Ad-hoc analysis for HA calls with explicit frames/urls.
+    Bypasses vision_on/screen_watch_on checks and always escalates to VL if escalate_vl is enabled.
+    """
+    global pending_jobs, lock_held
+    source = payload.get("source", "adhoc")
+    ANALYZE_TOTAL.labels(source).inc()
+
+    # Build VL bundle from explicit frames
+    top_k = int(config.get("max_frames", MAX_FRAMES))
+    bundle = _build_vl_bundle(payload, top_k)
+
+    event_id = str(uuid.uuid4())
+    result: Dict[str, Any] = {"id": event_id, "source": source}
+
+    if not config.get("escalate_vl", ESCL_ENABLED):
+        SKIP_TOTAL.labels(reason="vl_disabled").inc()
+        result["escalated"] = False
+        result["reason"] = "escalate_vl disabled"
+        return JSONResponse(result)
+
+    # Escalate to VL
+    _check_backpressure()
+    if LOCK_ON_ESCALATE and not lock_held:
+        await set_lock({"enabled": True})
+
+    pending_jobs += 1
+    QUEUE_G.set(pending_jobs)
+    ESC_TOTAL.labels(reason="adhoc").inc()
+
+    vl_result = await _escalate_to_vl(bundle)
+
+    pending_jobs = max(0, pending_jobs - 1)
+    QUEUE_G.set(pending_jobs)
+    if LOCK_ON_ESCALATE and lock_held:
+        await set_lock({"enabled": False})
+
+    result["escalated"] = True
+    result["vl"] = vl_result
+    result["bundle"] = bundle  # Include bundle for debugging
+
+    return JSONResponse(result)
+
+
+async def _gpu_poller_task() -> None:
+    """Background task to poll GPU stats every 5s and maintain utilization history."""
+    while True:
+        await asyncio.sleep(5.0)
+        try:
+            gpus = snapshot_gpus() if nvml_available() else []
+            if gpus:
+                # Calculate average utilization across all GPUs
+                avg_util = sum(gpu.get("util", 0.0) for gpu in gpus) / len(gpus)
+                _gpu_util_history.append(avg_util)
+                # Update cache
+                _gpu_cache["gpus"] = gpus
+                _gpu_cache["last_update"] = time.time()
+                # Update Prometheus gauges
+                for gpu in gpus:
+                    index = str(gpu.get("index", 0))
+                    GPU_UTIL_G.labels(index=index).set(gpu.get("util", 0.0))
+                    GPU_MEM_FREE_G.labels(index=index).set(gpu.get("mem_free_gb", 0.0))
+        except Exception as exc:
+            logger.warning(f"GPU poller error: {exc}")
+
+
 @app.on_event("startup")
 async def on_start() -> None:
     HEALTH_G.set(1.0)
     _update_config_metrics()
+    # Start background GPU poller
+    asyncio.create_task(_gpu_poller_task())
+    logger.info("vision-router started, GPU poller running")
 
 
 @app.on_event("shutdown")

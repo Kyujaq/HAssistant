@@ -106,14 +106,17 @@ services:
     image: ghcr.io/home-assistant/home-assistant:stable
     container_name: hassistant-homeassistant
     volumes:
-      - /home/qjaq/assistant/data/ha_config:/config
+      - /home/qjaq/HAssistant/ha_config:/config
       - /etc/localtime:/etc/localtime:ro
     ports:
       - "8123:8123"
     restart: unless-stopped
     privileged: true
+    extra_hosts:
+      - "homeassistant.myhometestdomain.home:192.168.2.13"
     networks:
       - ha_network
+      - hassistant_v2_default
 
   # PostgreSQL with pgvector for Letta memory
   postgres:
@@ -137,6 +140,7 @@ services:
       retries: 5
     networks:
       - ha_network
+
 
   # Redis for session cache and ephemeral data
   redis:
@@ -625,6 +629,9 @@ volumes:
   double-take-media:
 
 networks:
+  hassistant_v2_default:
+    external: true
+    name: hassistant_v2_default  # Connect to existing v2 network
   ha_network:
     external: true
     name: assistant_default  # Connect to existing HA network

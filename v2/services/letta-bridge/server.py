@@ -32,7 +32,7 @@ add_latency_ms = Histogram("letta_add_latency_ms", "Add latency in milliseconds"
 # Global state for stats
 _last_hits = 0
 _last_used = False
-_config = {"autosave": True, "min_score": 0.62, "top_k": 6, "ingest": True}
+_config = {"autosave": True, "min_score": 0.5, "top_k": 6, "ingest": True}
 
 
 class QueryHistory:

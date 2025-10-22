@@ -7,15 +7,15 @@ set -e
 HOST_IP="${HOST_IP:-localhost}"
 VIDEO_SIZE="${VIDEO_SIZE:-1280x720}"
 FRAMERATE="${FRAMERATE:-8}"
-CAPTURE_DEVICE="${SCREEN_CAPTURE_DEVICE:-}"
-CAPTURE_INPUT_FORMAT="${SCREEN_CAPTURE_INPUT_FORMAT:-}"
+CAPTURE_DEVICE="${SCREEN_CAPTURE_DEVICE:-/dev/video2}"
+CAPTURE_INPUT_FORMAT="${SCREEN_CAPTURE_INPUT_FORMAT:-mjpeg}"
 DISPLAY="${DISPLAY:-:0.0}"
 
 echo "=== Streaming Screen Feed to MediaMTX ==="
 echo "Target: rtsp://$HOST_IP:8554/screen"
 
 if [[ -n "$CAPTURE_DEVICE" && -e "$CAPTURE_DEVICE" ]]; then
-    echo "Source: USB capture device ($CAPTURE_DEVICE)"
+    echo "Source: HDMI capture device ($CAPTURE_DEVICE)"
     echo "Size: $VIDEO_SIZE @ ${FRAMERATE}fps"
     echo ""
 
@@ -44,7 +44,7 @@ if [[ -n "$CAPTURE_DEVICE" && -e "$CAPTURE_DEVICE" ]]; then
 else
     if [[ -z "$DISPLAY" ]]; then
         echo "❌ DISPLAY not set and no SCREEN_CAPTURE_DEVICE provided."
-        echo "Set SCREEN_CAPTURE_DEVICE to your HDMI capture device (e.g. /dev/video1)."
+        echo "Set SCREEN_CAPTURE_DEVICE to your HDMI capture device (e.g. /dev/video2)."
         exit 1
     fi
 

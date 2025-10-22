@@ -5,6 +5,8 @@
 set -e
 
 SCRIPT_DIR="$(dirname "$0")"
+SCREEN_CAPTURE_DEVICE="${SCREEN_CAPTURE_DEVICE:-/dev/video2}"
+SCREEN_CAPTURE_INPUT_FORMAT="${SCREEN_CAPTURE_INPUT_FORMAT:-mjpeg}"
 
 echo "=== Starting MediaMTX Streams ==="
 
@@ -32,14 +34,18 @@ fi
 echo ""
 
 # Start screen stream in background
-if [ -n "$DISPLAY" ]; then
+if { [ -n "$DISPLAY" ] || { [ -n "$SCREEN_CAPTURE_DEVICE" ] && [ -e "$SCREEN_CAPTURE_DEVICE" ]; }; }; then
     echo "Starting screen capture stream (screen)..."
+    echo "  Device: ${SCREEN_CAPTURE_DEVICE:-'(using X11)'}"
+    SCREEN_CAPTURE_DEVICE="$SCREEN_CAPTURE_DEVICE" \
+    SCREEN_CAPTURE_INPUT_FORMAT="$SCREEN_CAPTURE_INPUT_FORMAT" \
+    DISPLAY="${DISPLAY}" \
     "$SCRIPT_DIR/stream_screen.sh" > /tmp/stream_screen.log 2>&1 &
     SCREEN_PID=$!
     echo "  PID: $SCREEN_PID"
     echo "  Log: /tmp/stream_screen.log"
 else
-    echo "⚠️  DISPLAY not set, skipping screen capture"
+    echo "⚠️  No screen capture device or DISPLAY available, skipping screen capture"
 fi
 
 echo ""
@@ -50,7 +56,7 @@ echo "  Webcam:  ffplay rtsp://localhost:8554/cam1"
 echo "  Screen:  ffplay rtsp://localhost:8554/screen"
 echo ""
 echo "Stop streams:"
-echo "  killall ffmpeg"
+echo "  pkill -f ffmpeg"
 echo ""
 echo "Check logs:"
 echo "  tail -f /tmp/stream_webcam.log"

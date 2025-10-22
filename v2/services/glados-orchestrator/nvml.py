@@ -12,9 +12,10 @@ try:
     import pynvml
     pynvml.nvmlInit()
     NVML_AVAILABLE = True
-except Exception:
+except Exception as e:
     pynvml = None
     NVML_AVAILABLE = False
+    print(f"Warning: NVML initialization failed: {e}", flush=True)
 
 GPU_INDEX = int(os.getenv("VL_GPU_INDEX", "0"))
 

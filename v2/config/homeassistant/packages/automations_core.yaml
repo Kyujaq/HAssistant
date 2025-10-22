@@ -2,8 +2,10 @@ sensor:
   - platform: rest
     name: Last Orchestrator Reply
     resource: http://orchestrator:8020/last_reply
-    value_template: "{{ value_json.text | default('') }}"
+    value_template: >
+      {{ value_json.text | default('') | truncate(250, True, '') }}
     json_attributes:
+      - text
       - turn_id
       - when
     scan_interval: 5
@@ -27,7 +29,10 @@ automation:
       - service: persistent_notification.create
         data:
           title: "GLaDOS - EOD Summary"
-          message: "{{ states('sensor.last_orchestrator_reply') | default('No reply') }}"
+          message: >
+            {{ state_attr('sensor.last_orchestrator_reply', 'text')
+               or states('sensor.last_orchestrator_reply')
+               or 'No reply' }}
 
   - id: glados_morning_brief
     alias: GLaDOS - Morning Brief
