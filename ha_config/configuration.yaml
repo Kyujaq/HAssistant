@@ -12,15 +12,6 @@ scene: !include scenes.yaml
 
 homeassistant:
   packages: !include_dir_named packages
-  internal_url: http://hassistant-homeassistant:8123
-  external_url: https://hassistant-v2.tail838fb6.ts.net
-
-http:
-  use_x_forwarded_for: true
-  trusted_proxies:
-    - 127.0.0.1
-    - 172.18.0.1
-    - 172.21.0.1
 
 # Letta Bridge REST Commands
 rest_command:
@@ -151,21 +142,14 @@ lovelace:
       title: System Health
       icon: mdi:stethoscope
       show_in_sidebar: true
-
+panel_iframe:
+  dozzle:
+    title: Dozzle
+    icon: mdi:console
+    url: http://dozzle:8080
 
 # Vision cameras from K80 VM - MUST be added via UI (YAML not supported)
 # To add cameras:
 # 1. Settings → Devices & Services → Add Integration → MJPEG Camera
 # 2. Add "Vision Screen Stream": http://192.168.122.71:8051/mjpeg/screen
 # 3. Add "Vision Realworld Stream": http://192.168.122.71:8052/mjpeg/cam
-
-
-# configuration.yaml (or whichever package you use)
-shell_command:
-  start_rtsp_streams: >-
-    ssh -i /config/ssh_keys/id_ed25519 -o StrictHostKeyChecking=no qjaq@192.168.2.13
-    "cd ~/HAssistant && HOST_IP=192.168.2.13 SCREEN_CAPTURE_DEVICE=/dev/video2
-    SCREEN_CAPTURE_INPUT_FORMAT=mjpeg v2/scripts/start_streams.sh"
-  stop_rtsp_streams: >-
-    ssh -i /config/ssh_keys/id_ed25519 -o StrictHostKeyChecking=no qjaq@192.168.2.13
-    'pkill -f ffmpeg || true'

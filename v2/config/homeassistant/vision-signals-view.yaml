@@ -1,62 +1,49 @@
-views:
-  - title: Vision Signals
-    path: vision-signals
-    icon: mdi:eye
-    cards:
-      - type: horizontal-stack
-        cards:
-          - type: picture-entity
-            entity: camera.screen_feed
-            name: Screen Feed
-            camera_view: live
-          - type: picture-entity
-            entity: camera.room_cam
-            name: Room Cam
-            camera_view: live
-      - type: entities
-        title: Vision Controls
-        entities:
-          - switch.vision_on
-          - switch.screen_watch_on
-          - input_number.vision_threshold
-          - input_number.vision_max_frames
-      - type: entities
-        title: Metrics
-        entities:
-          - sensor.vl_requests_today
-          - sensor.vision_events_ingested
-          - sensor.vision_router_queue_depth
-          - sensor.vision_router_lock_enabled
-          - sensor.vision_router_events_total
-          - sensor.vision_router_escalations_total
-          - sensor.vision_router_gpu0_util_percent
-          - sensor.vision_router_gpu0_mem_free_gb
-          - sensor.orchestrator_privacy_paused_total
+title: Vision Signals
+path: vision-signals
+icon: mdi:radar
+cards:
+  - type: entities
+    title: Controls
+    entities:
+      - switch.vision_on
+      - switch.screen_watch_on
+      - input_number.vision_threshold
+      - input_number.vision_max_frames
 
-      - type: entities
-        title: Frigate (VM)
-        entities:
-          - sensor.frigate_version
-          - sensor.frigate_uptime
-          - sensor.frigate_cpu_percent
-          - sensor.frigate_mem_percent
+  - type: gauge
+    name: Queue Depth
+    entity: sensor.vision_queue_depth
+    min: 0
+    max: 20
+    severity:
+      green: 0
+      yellow: 5
+      red: 10
 
-      - type: picture-glance
-        title: Room Cam
-        entities: []
-        camera_image: camera.room_cam
-        camera_view: live
+  - type: entities
+    title: GPU 0
+    entities:
+      - sensor.vision_gpu0_util
+      - sensor.vision_gpu0_mem_free_gb
 
-      - type: history-graph
-        title: Queue & Util (last 6h)
-        hours_to_show: 6
-        refresh_interval: 60
-        entities:
-          - sensor.vision_router_queue_depth
-          - sensor.vision_router_gpu0_util_percent
-      - type: markdown
-        title: Notes
-        content: >
-          - Use the switches to gate events at the router.
-          - Threshold/Max Frames update the router in real time.
-          - Streams pull from the vision gateways' MJPEG endpoints.
+  - type: entities
+    title: GPU 1
+    entities:
+      - sensor.vision_gpu1_util
+      - sensor.vision_gpu1_mem_free_gb
+
+  - type: history-graph
+    title: Queue & Util (last 6h)
+    hours_to_show: 6
+    refresh_interval: 30
+    entities:
+      - sensor.vision_queue_depth
+      - sensor.vision_gpu0_util
+      - sensor.vision_gpu1_util
+
+  - type: markdown
+    title: Notes
+    content: >
+      - **Threshold** controls when pre-filtered events escalate to the VL model.
+      - **Max Frames** caps the bundle size sent to VL.
+      - Turn **Screen Watch** off to ignore desktop/screen sources.

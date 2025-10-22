@@ -1,0 +1,11 @@
+title: HAssistant
+views:
+  - title: Overview
+    path: overview
+    cards:
+      - type: markdown
+        title: Dashboards
+        content: |
+          ## Dashboards
+          - [Memory Dashboard](/memory)
+          - [Speech Dashboard](/speech)

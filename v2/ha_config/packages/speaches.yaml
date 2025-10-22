@@ -1,0 +1,78 @@
+# Speaches Speech Stack Monitoring
+# Provides sensors for health, latency metrics, and TTS fallback control
+# Requires: speaches service running at hassistant_v2_speaches:8000
+
+homeassistant:
+  customize:
+    sensor.speaches_health:
+      friendly_name: "Speech Engine Health"
+      icon: mdi:robot-outline
+    sensor.speaches_stt_latency:
+      friendly_name: "STT Latency (avg)"
+      icon: mdi:microphone
+    sensor.speaches_tts_latency:
+      friendly_name: "TTS Latency (avg)"
+      icon: mdi:speaker
+    switch.speaches_use_fallback_tts:
+      friendly_name: "Use Fallback TTS"
+      icon: mdi:swap-horizontal
+
+sensor:
+  - platform: rest
+    name: Speaches Health
+    resource: http://hassistant_v2_speaches:8000/health
+    value_template: "{{ value_json.ok }}"
+    json_attributes:
+      - device
+      - whisper_model
+      - sample_rate
+      - tts_status
+    scan_interval: 30
+
+  - platform: rest
+    name: Speaches STT Latency
+    resource: http://hassistant_v2_speaches:8000/metrics
+    value_template: >
+      {% set lines = value.split('\n') %}
+      {% set sum_val = namespace(val=0) %}
+      {% set cnt_val = namespace(val=0) %}
+      {% for l in lines %}
+        {% if 'speaches_latency_seconds_sum{route="stt"}' in l %}
+          {% set sum_val.val = l.split(' ')[1]|float %}
+        {% endif %}
+        {% if 'speaches_latency_seconds_count{route="stt"}' in l %}
+          {% set cnt_val.val = l.split(' ')[1]|float %}
+        {% endif %}
+      {% endfor %}
+      {{ (sum_val.val / (cnt_val.val if cnt_val.val > 0 else 1)) | round(3) }}
+    unit_of_measurement: s
+    scan_interval: 30
+
+  - platform: rest
+    name: Speaches TTS Latency
+    resource: http://hassistant_v2_speaches:8000/metrics
+    value_template: >
+      {% set lines = value.split('\n') %}
+      {% set sum_val = namespace(val=0) %}
+      {% set cnt_val = namespace(val=0) %}
+      {% for l in lines %}
+        {% if 'speaches_latency_seconds_sum{route="tts"}' in l %}
+          {% set sum_val.val = l.split(' ')[1]|float %}
+        {% endif %}
+        {% if 'speaches_latency_seconds_count{route="tts"}' in l %}
+          {% set cnt_val.val = l.split(' ')[1]|float %}
+        {% endif %}
+      {% endfor %}
+      {{ (sum_val.val / (cnt_val.val if cnt_val.val > 0 else 1)) | round(3) }}
+    unit_of_measurement: s
+    scan_interval: 30
+
+switch:
+  - platform: rest
+    name: Speaches Use Fallback TTS
+    resource: http://hassistant_v2_wyoming_proxy:8080/config
+    body_on: '{"tts_fallback": true}'
+    body_off: '{"tts_fallback": false}'
+    is_on_template: "{{ value_json.tts_fallback | default(false) }}"
+    headers:
+      Content-Type: application/json

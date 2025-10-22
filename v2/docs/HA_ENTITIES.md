@@ -9,14 +9,13 @@
 - `sensor.last_orchestrator_reply` - REST sensor reading the latest orchestrator reply for automations.
 - `switch.privacy_pause` - REST switch toggling orchestrator privacy halt.
 
-- Switches: `switch.vision_on`, `switch.screen_watch_on` - REST switches posting to `http://vision-router:8050/config` for immediate toggles (orchestrator `/vision/config` remains available for automations that prefer a single entry point).
+# Vision Signals
 - `sensor.vl_requests_today` - Prometheus scrape of VL text hits (orchestrator metrics).
 - `sensor.vision_events_ingested` - Prometheus scrape of vision ingest counter.
 - `sensor.vision_router_queue_depth` - REST sensor hitting `http://vision-router:8050/stats` (queue depth, attributes include lock, totals, GPU list).
 - `sensor.vision_router_lock_enabled`, `sensor.vision_router_events_total`, `sensor.vision_router_escalations_total` - template sensors bound to the `/stats` attributes for dashboards and alerts.
 - `sensor.vision_router_gpu0_util_percent`, `sensor.vision_router_gpu0_mem_free_gb` - NVML telemetry (utilisation + free memory) surfaced from the new `/stats` endpoint.
-- Cameras: `camera.screen_feed`, `camera.room_cam` - MJPEG feeds exposed by the screen and room gateways.
-- Frigate sensors: `sensor.frigate_version`, `sensor.frigate_uptime`, `sensor.frigate_cpu_percent`, `sensor.frigate_mem_percent` - uptime/health exposed from the K80 Frigate services.
+- `switch.vision_on`, `switch.screen_watch_on` - REST switches posting to `http://vision-router:8050/config` to gate processing/escalations.
 
 # Night Crew
 - `sensor.pantry_inventory` + top input_numbers reused for nightly runs.

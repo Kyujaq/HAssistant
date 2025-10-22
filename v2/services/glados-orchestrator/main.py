@@ -1571,7 +1571,7 @@ Assistant:"""
         if realtime_queue is not None:
             reply = await route_and_generate(conv_id, prompt, user_text, stream_handler=_stream_chunk)
         else:
-            reply = await route_and_generate(conv_id, prompt, user_text, stream_handler=_stream_chunk)
+            reply = await route_and_generate(conv_id, prompt, user_text)
     finally:
         if realtime_queue is not None:
             try:
