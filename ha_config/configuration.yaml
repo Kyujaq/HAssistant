@@ -88,6 +88,12 @@ logger:
     homeassistant.components.assist_pipeline: debug
     homeassistant.components.conversation: debug
 
+panel_iframe:
+  dozzle:
+    title: Dozzle
+    icon: mdi:console
+    url: http://dozzle:8080
+
 # rest:
 #   - resource: http://hassistant-kitchen-api:8083/inventory/current
 #     scan_interval: 300
@@ -142,14 +148,15 @@ lovelace:
       title: System Health
       icon: mdi:stethoscope
       show_in_sidebar: true
-panel_iframe:
-  dozzle:
-    title: Dozzle
-    icon: mdi:console
-    url: http://dozzle:8080
-
 # Vision cameras from K80 VM - MUST be added via UI (YAML not supported)
 # To add cameras:
 # 1. Settings → Devices & Services → Add Integration → MJPEG Camera
 # 2. Add "Vision Screen Stream": http://192.168.122.71:8051/mjpeg/screen
 # 3. Add "Vision Realworld Stream": http://192.168.122.71:8052/mjpeg/cam
+
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 172.18.0.0/16
+  ssl_certificate: /config/ssl_certs/fullchain.pem
+  ssl_key: /config/ssl_certs/privkey.pem
