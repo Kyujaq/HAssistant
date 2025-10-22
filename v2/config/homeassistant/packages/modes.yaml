@@ -2,10 +2,7 @@ select:
   - platform: template
     name: Energy Band
     value_template: "{{ state_attr('sensor.orchestrator_config', 'energy_band') | default('medium') }}"
-    options:
-      - low
-      - medium
-      - high
+    options: "{{ ['low', 'medium', 'high'] }}"
     select_option:
       service: rest_command.set_orch_config
       data:
@@ -14,10 +11,7 @@ select:
   - platform: template
     name: Focus Mode
     value_template: "{{ state_attr('sensor.orchestrator_config', 'focus_mode') | default('admin') }}"
-    options:
-      - deep
-      - admin
-      - errands
+    options: "{{ ['deep', 'admin', 'errands'] }}"
     select_option:
       service: rest_command.set_orch_config
       data:
