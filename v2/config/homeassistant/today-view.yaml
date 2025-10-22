@@ -1,0 +1,24 @@
+title: Today
+path: today
+icon: mdi:calendar-today
+cards:
+  - type: entities
+    title: Modes
+    entities:
+      - select.energy_band
+      - select.focus_mode
+      - switch.privacy_pause
+  - type: entities
+    title: Activity Counters
+    entities:
+      - sensor.vl_requests_today
+      - sensor.memory_additions_today
+      - sensor.vision_router_queue_depth
+  - type: markdown
+    title: Latest Reply
+    content: >
+      **Last reply:** {{ state_attr('sensor.last_orchestrator_reply', 'text') or states('sensor.last_orchestrator_reply') or 'None yet' }}
+
+      **Turn:** {{ state_attr('sensor.last_orchestrator_reply', 'turn_id') or 'n/a' }}
+
+      **Timestamp:** {{ state_attr('sensor.last_orchestrator_reply', 'when') or 'n/a' }}

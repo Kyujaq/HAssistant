@@ -1,0 +1,141 @@
+
+homeassistant:
+  customize:
+    switch.vision_on:
+      icon: mdi:eye
+    switch.screen_watch_on:
+      icon: mdi:monitor-eye
+    input_number.vision_threshold:
+      icon: mdi:tune
+    input_number.vision_max_frames:
+      icon: mdi:image-multiple
+    camera.vision_screen_stream:
+      icon: mdi:monitor
+    camera.vision_realworld_stream:
+      icon: mdi:video-wireless
+    sensor.vision_router_queue_depth:
+      icon: mdi:queue-first-in-last-out
+    sensor.vision_router_lock_enabled:
+      icon: mdi:lock
+    sensor.vision_router_gpu0_util_percent:
+      icon: mdi:chip
+    sensor.vision_router_gpu0_mem_free_gb:
+      icon: mdi:memory
+
+switch:
+  - platform: rest
+    name: Vision On
+    resource: http://orchestrator:8020/vision/config
+    body_on: '{"vision_on": true}'
+    body_off: '{"vision_on": false}'
+    is_on_template: "{{ value_json.router.vision_on | default(false) }}"
+    headers:
+      Content-Type: application/json
+
+  - platform: rest
+    name: Screen Watch On
+    resource: http://orchestrator:8020/vision/config
+    body_on: '{"screen_watch_on": true}'
+    body_off: '{"screen_watch_on": false}'
+    is_on_template: "{{ value_json.router.screen_watch_on | default(false) }}"
+    headers:
+      Content-Type: application/json
+
+input_number:
+  vision_threshold:
+    name: Vision Escalation Threshold
+    min: 0
+    max: 1
+    step: 0.01
+    mode: slider
+    icon: mdi:tune
+    initial: 0.55
+
+  vision_max_frames:
+    name: Vision Max Frames Per Bundle
+    min: 1
+    max: 12
+    step: 1
+    mode: slider
+    icon: mdi:image-multiple
+    initial: 6
+
+rest_command:
+  set_vision_config:
+    url: http://orchestrator:8020/vision/config
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload: "{{ payload }}"
+
+automation:
+  - id: vr_update_threshold
+    alias: Vision Router - Update Threshold
+    trigger:
+      - platform: state
+        entity_id: input_number.vision_threshold
+    action:
+      - service: rest_command.set_vision_config
+        data:
+          payload: >
+            {"threshold": {{ states('input_number.vision_threshold') | float }} }
+
+  - id: vr_update_max_frames
+    alias: Vision Router - Update Max Frames
+    trigger:
+      - platform: state
+        entity_id: input_number.vision_max_frames
+    action:
+      - service: rest_command.set_vision_config
+        data:
+          payload: >
+            {"max_frames": {{ states('input_number.vision_max_frames') | int }} }
+
+sensor:
+  - platform: rest
+    name: Vision Router Queue Depth
+    resource: http://vision-router:8050/stats
+    value_template: "{{ value_json.queue_depth | float(0) }}"
+    unit_of_measurement: events
+    json_attributes:
+      - lock_enabled
+      - events_total
+      - escalations_total
+      - gpus
+      - config
+    scan_interval: 10
+
+  - platform: template
+    sensors:
+      vision_router_lock_enabled:
+        friendly_name: Vision Lock Enabled
+        value_template: >-
+          {{ state_attr('sensor.vision_router_queue_depth', 'lock_enabled') | default(false) }}
+      vision_router_events_total:
+        friendly_name: Vision Events Total
+        unit_of_measurement: events
+        value_template: >-
+          {{ state_attr('sensor.vision_router_queue_depth', 'events_total') | default(0) }}
+      vision_router_escalations_total:
+        friendly_name: Vision Escalations Total
+        unit_of_measurement: events
+        value_template: >-
+          {{ state_attr('sensor.vision_router_queue_depth', 'escalations_total') | default(0) }}
+      vision_router_gpu0_util_percent:
+        friendly_name: Vision GPU0 Utilization
+        unit_of_measurement: '%'
+        value_template: >-
+          {% set g = state_attr('sensor.vision_router_queue_depth', 'gpus') or [] %}
+          {% if g | length > 0 %}{{ g[0]['util'] | default(0) }}{% else %}0{% endif %}
+      vision_router_gpu0_mem_free_gb:
+        friendly_name: Vision GPU0 Free Memory
+        unit_of_measurement: GB
+        value_template: >-
+          {% set g = state_attr('sensor.vision_router_queue_depth', 'gpus') or [] %}
+          {% if g | length > 0 %}{{ g[0]['mem_free_gb'] | default(0) }}{% else %}0{% endif %}
+
+# MJPEG cameras must be added via UI (Home Assistant no longer supports YAML config for MJPEG)
+# To add:
+#   Settings → Devices & Services → Add Integration → MJPEG Camera
+#   - Vision Screen Stream: http://192.168.122.71:8051/mjpeg/screen
+#   - Vision Realworld Stream: http://192.168.122.71:8052/mjpeg/cam

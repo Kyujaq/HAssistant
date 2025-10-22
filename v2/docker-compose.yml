@@ -237,6 +237,27 @@ services:
       retries: 10
     restart: on-failure:3
 
+  memory-migrations:
+    image: pgvector/pgvector:pg16
+    container_name: hassistant_v2_mem_migrations
+    environment:
+      PGPASSWORD: glados
+    volumes:
+      - ./scripts/05_memory_dedup.sql:/migrations/05_memory_dedup.sql:ro
+    command:
+      - psql
+      - -h
+      - postgres
+      - -U
+      - glados
+      - -d
+      - glados
+      - -f
+      - /migrations/05_memory_dedup.sql
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
   memory-embed:
     build: { context: ./services/memory-embed }
     container_name: hassistant_v2_memembed
@@ -246,6 +267,7 @@ services:
       - TOP_K=8
     depends_on:
       postgres: { condition: service_healthy }
+      memory-migrations: { condition: service_completed_successfully }
     ports:
       - "8001:8001"
     volumes:
@@ -257,23 +279,24 @@ services:
       retries: 5
     restart: on-failure:3
 
-  letta-bridge:
-    build: { context: ./services/letta-bridge }
-    container_name: hassistant_v2_lettabridge
-    environment:
-      - MEMORY_URL=http://memory-embed:8001
-      - DATABASE_URL=postgresql://glados:glados@postgres:5432/glados
-    depends_on:
-      memory-embed: { condition: service_healthy }
-      postgres: { condition: service_healthy }
-    ports:
-      - "8010:8010"
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8010/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-    restart: on-failure:3
+  # letta-bridge:
+  #   build: { context: ./services/letta-bridge }
+  #   container_name: hassistant_v2_lettabridge
+  #   environment:
+  #     - MEMORY_URL=http://memory-embed:8001
+  #     - DATABASE_URL=postgresql://glados:glados@postgres:5432/glados
+  #   depends_on:
+  #     memory-embed: { condition: service_healthy }
+  #     postgres: { condition: service_healthy }
+  #     memory-migrations: { condition: service_completed_successfully }
+  #   ports:
+  #     - "8010:8010"
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-fsS", "http://localhost:8010/health"]
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 5
+  #   restart: on-failure:3
 
   # GLaDOS Orchestrator - Memory-aware chat service with intelligent routing
   orchestrator:
@@ -307,8 +330,7 @@ services:
       - HA_BASE_URL=${HA_BASE_URL:-http://assistant-ha:8123}
       - HA_TOKEN=${HA_TOKEN:-}
       # Memory configuration
-      - MEMORY_URL=http://letta-bridge:8010
-      - LETTABRIDGE_URL=http://letta-bridge:8010
+      - MEMORY_URL=http://192.168.2.13:8283
       - MEMORY_AUTOSAVE_ON=1
       - MEMORY_TOP_K=6
       - MEMORY_MIN_SCORE=0.5
@@ -325,7 +347,7 @@ services:
     depends_on:
       ollama-text: { condition: service_healthy }
       ollama-vl: { condition: service_healthy }
-      letta-bridge: { condition: service_healthy }
+      #letta-bridge: { condition: service_healthy }
       memory-embed: { condition: service_healthy }
     ports:
       - "8021:8020"
@@ -378,6 +400,24 @@ services:
         aliases: ["dozzle"]
 
   # NVIDIA GPU stats to Home Assistant via MQTT
+
+  letta-server:
+    image: lettaai/letta:latest
+    container_name: hassistant_v2_letta_server
+    environment:
+      - POSTGRES_DB=letta
+      - POSTGRES_USER=glados
+      - POSTGRES_PASSWORD=glados
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - OLLAMA_BASE_URL=http://ollama-text:11434
+    depends_on:
+      - postgres
+    ports:
+      - "8083:8083"
+      - "8283:8283"
+    restart: on-failure:3
+
   smi2mqtt:
     build:
       context: ./services/smi2mqtt/smi2mqtt

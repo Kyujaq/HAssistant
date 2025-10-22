@@ -1,0 +1,6 @@
+{
+  "broker": "mosquitto:1883",
+  "mqtt_username": ,
+  "mqtt_password": ,
+  "ha": true
+}

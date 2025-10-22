@@ -1,0 +1,12 @@
+﻿fastapi>=0.110
+uvicorn[standard]>=0.24
+httpx>=0.27
+prometheus-client>=0.20
+pydantic>=2.7
+python-json-logger>=2.0
+pillow>=10.3
+numpy>=1.26
+jsonschema>=4.23
+nvidia-ml-py
+python-multipart>=0.0.9
+

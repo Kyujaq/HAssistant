@@ -1,3 +1,39 @@
+async def call_ollama_model_stream(
+    base_url: str,
+    model: str,
+    prompt: str,
+    max_tokens: int = None,
+    timeout_s: float = 30.0,
+):
+    """
+    Stream tokens from an Ollama model.
+
+    Yields partial response chunks as they are produced.
+    """
+    payload = {"model": model, "prompt": prompt, "stream": True}
+    if max_tokens:
+        payload["options"] = {"num_predict": max_tokens}
+
+    timeout = httpx.Timeout(connect=3.0, read=timeout_s, write=10.0, pool=3.0)
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream("POST", f"{base_url}/api/generate", json=payload) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                chunk = data.get("response") or ""
+                if chunk:
+                    yield chunk
+                if data.get("done"):
+                    final = data.get("final_response")
+                    if isinstance(final, str) and final:
+                        yield final
+                    break
 """
 GLaDOS Orchestrator - Memory-aware chat service with intelligent routing
 Step 2.5: Memory <-> LLM Integration
@@ -67,10 +103,9 @@ OLLAMA_VL_URL = os.getenv("OLLAMA_VL_URL", "http://ollama-vl:11434")
 # Model configuration
 TEXT_MODEL_FAST = os.getenv("OLLAMA_TEXT_MODEL_FAST", "hermes3:latest")
 TEXT_MODEL = os.getenv("OLLAMA_TEXT_MODEL", "qwen3:4b")
-VL_MODEL = os.getenv("OLLAMA_MODEL_VL", "qwen2.5:3b")
+    async def call_ollama_model_stream(
 
 # Memory configuration
-LETTABRIDGE_URL = os.getenv("LETTABRIDGE_URL", "http://letta-bridge:8010")
 MEM_MIN_SCORE = float(os.getenv("MEMORY_MIN_SCORE", "0.62"))
 CTX_LIMIT = int(os.getenv("MEMORY_MAX_CTX_CHARS", "1200"))
 TOP_K = int(os.getenv("MEMORY_TOP_K", "6"))
@@ -223,6 +258,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize app and services
+
 app = FastAPI(title="glados-orchestrator")
 app.add_middleware(
     CORSMiddleware,
@@ -233,6 +269,49 @@ app.add_middleware(
 )
 bg = Bg()
 mem = MemoryClient()
+
+# Global agent_id for orchestrator
+ORCHESTRATOR_AGENT_NAME = os.getenv("ORCHESTRATOR_AGENT_NAME", "glados_orchestrator")
+ORCHESTRATOR_AGENT_ID = None
+
+async def ensure_orchestrator_agent():
+    """
+    Ensure the orchestrator agent exists in Letta. If not, create it and store agent_id.
+    """
+    global ORCHESTRATOR_AGENT_ID
+    base_url = os.getenv("LETTA_SERVER_URL", "http://letta-server:8283")
+    # Try to find agent by name
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{base_url}/agents", params={"name": ORCHESTRATOR_AGENT_NAME})
+            resp.raise_for_status()
+            agents = resp.json().get("agents", [])
+            if agents:
+                ORCHESTRATOR_AGENT_ID = agents[0]["id"]
+                logger.info(f"Found orchestrator agent: {ORCHESTRATOR_AGENT_ID}")
+                return
+    except Exception as e:
+        logger.warning(f"Agent lookup failed: {e}")
+
+    # If not found, create agent
+    payload = {
+        "name": ORCHESTRATOR_AGENT_NAME,
+        "memoryBlocks": [
+            {"label": "persona", "value": "I am a memory-aware assistant for Home Assistant."},
+            {"label": "human", "value": "Name: User\nFirst interaction: Home Assistant"}
+        ],
+        "model": "openai/gpt-4o-mini"
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(f"{base_url}/agents", json=payload)
+            resp.raise_for_status()
+            agent = resp.json()
+            ORCHESTRATOR_AGENT_ID = agent["id"]
+            logger.info(f"Created orchestrator agent: {ORCHESTRATOR_AGENT_ID}")
+    except Exception as e:
+        logger.error(f"Failed to create orchestrator agent: {e}")
+        ORCHESTRATOR_AGENT_ID = None
 
 _HA_GROCERY_KEYWORDS = {
     "grocery",
@@ -496,15 +575,25 @@ async def vision_event(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
 
     text_blob = _format_vision_memory(event)
     if text_blob:
+        # Use agent-centric memory API (Letta)
+        agent_id = str(conv_id) if conv_id else str(turn_id)
+        memory_block = {
+            "text": text_blob,
+            "turn_id": turn_id,
+            "role": "system",
+            "ctx_hits": 0,
+            "kind": memory_kind,
+            "source": "vision-router",
+            "meta": {
+                "stage": stage,
+                "event_id": event_id,
+                "tags": deduped_tags,
+                "score": event.get("score"),
+                "ts": event.get("ts"),
+            }
+        }
         bg.spawn(
-            mem.add(
-                text=text_blob,
-                turn_id=turn_id,
-                role="system",
-                ctx_hits=0,
-                kind=memory_kind,
-                source="vision-router",
-            ),
+            mem.add_agent_memory(agent_id, memory_block),
             name=f"vision_{stage}_{turn_id[:8]}",
         )
 
@@ -1054,21 +1143,8 @@ async def call_ollama_model(base_url: str, model: str, prompt: str, max_tokens: 
         payload["options"] = {"num_predict": max_tokens}
 
     timeout = httpx.Timeout(connect=3.0, read=timeout_s, write=10.0, pool=3.0)
+    timeout_s: float = 30.0
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(f"{base_url}/api/generate", json=payload)
-        response.raise_for_status()
-        data = response.json()
-        return data.get("response") or data.get("text") or ""
-
-
-async def call_ollama_model_stream(
-    base_url: str,
-    model: str,
-    prompt: str,
-    max_tokens: int = None,
-    timeout_s: float = 30.0,
-):
     """
     Stream tokens from an Ollama model.
 
@@ -1477,16 +1553,13 @@ async def chat(payload: Dict = Body(...)) -> JSONResponse:
     # --- PRE-RETRIEVAL ---
     t0 = time.time()
     try:
-        hits = await mem.search(
-            user_text,
-            turn_id=turn_id,
-            top_k=TOP_K,
-            filter={"kinds": ["note", "task", "doc", "chat_assistant"]}
-        )
-        # Filter by score threshold
-        hits = [h for h in hits if h.get("score", 0.0) >= MEM_MIN_SCORE]
+        agent_id = str(conv_id) if conv_id else str(turn_id)
+        # Use agent-centric memory search
+        results = await mem.search_agent_memory(agent_id, user_text, top_k=TOP_K)
+        # Filter by score threshold if present
+        hits = [h for h in results if h.get("score", 0.0) >= MEM_MIN_SCORE]
     except Exception as e:
-        logger.warning(f"Memory search failed: {e}")
+        logger.warning(f"Agent memory search failed: {e}")
         hits = []
 
     pre_ms = (time.time() - t0) * 1000
@@ -1630,16 +1703,6 @@ Assistant:"""
     post_ms = (time.time() - t1) * 1000
     POST_MS.observe(post_ms)
 
-    # --- SIGNAL TO LETTA-BRIDGE ---
-    # Tell letta-bridge whether memory was actually used
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post(
-                f"{LETTABRIDGE_URL}/stats/hit",
-                json={"used": bool(hits), "hits": len(hits)}
-            )
-    except Exception as e:
-        logger.debug(f"Failed to signal letta-bridge: {e}")
 
     logger.info(f"Post-storage: {post_ms:.1f}ms")
 
@@ -1797,11 +1860,13 @@ async def realtime_claim(payload: Dict = Body(...)) -> JSONResponse:
     return JSONResponse(result)
 
 
+
 @app.on_event("startup")
 async def startup_event():
-    """Load inventory from file on startup"""
+    """Load inventory and ensure orchestrator agent exists on startup"""
     global inventory_data
     _update_config_metrics()
+    await ensure_orchestrator_agent()
     if os.path.exists(INVENTORY_FILE):
         try:
             with open(INVENTORY_FILE, "r") as f:

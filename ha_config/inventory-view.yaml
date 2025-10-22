@@ -1,0 +1,25 @@
+views:
+  - title: Inventory
+    path: inventory
+    icon: mdi:fridge
+    cards:
+      - type: entities
+        title: Top Items
+        entities:
+          - input_number.inv_milk_qty
+          - input_number.inv_eggs_qty
+          - input_number.inv_bread_qty
+      - type: markdown
+        title: Snapshot
+        content: >
+          **Last updated:** {{ state_attr('sensor.pantry_inventory','updated_at') }}
+
+          **Item count:** {{ states('sensor.pantry_inventory') }}
+      - type: custom:state-switch
+        entity: user
+        states:
+          default:
+            type: entities
+            title: Bulk Actions
+            entities:
+              - button.inventory_sync_from_json

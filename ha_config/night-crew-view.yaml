@@ -1,0 +1,21 @@
+views:
+  - title: Night Crew
+    path: night-crew
+    icon: mdi:weather-night
+    cards:
+      - type: calendar
+        initial_view: agendaWeek
+        entities:
+          - calendar.menu_plan
+          - calendar.personal
+      - type: entities
+        title: Inventory Quick View
+        entities:
+          - sensor.pantry_inventory
+          - input_number.inv_milk_qty
+          - input_number.inv_eggs_qty
+          - input_number.inv_bread_qty
+      - type: markdown
+        title: Notes
+        content: >
+          Use the **Inventory** dashboard for bulk edits and sync.

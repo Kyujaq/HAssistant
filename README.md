@@ -44,6 +44,7 @@ Recent merge commits show each major feature branch already collapsed into `work
 | Speech-to-text | `whisper` | Wyoming Whisper server with CUDA acceleration. | NVIDIA GPU 1, `whisper_data` volume. |
 | Text-to-speech | `piper-glados` | Wyoming Piper server with GLaDOS and kathleen-high voices. | NVIDIA GPU 1, `piper_data` volume. |
 | Memory API | `letta-bridge` | FastAPI bridge for tiered memory, embeddings, and briefs. | `postgres`, `redis`, `.env` secrets. |
+| Memory migrations | `memory-migrations` | Idempotent job that applies `05_memory_dedup.sql` so schemas stay current. | `postgres`, `v2/scripts/05_memory_dedup.sql`. |
 | Persistence | `postgres`, `redis` | Store pgvector embeddings + session cache. | `scripts/*.sql` for schema bootstrapping. |
 | Conversation router | `glados-orchestrator` | Provides specialized tools for Ollama LLMs (memory, time, skills). | `letta-bridge`. |
 | Agent runtime | `qwen-agent` | Optional advanced agent that calls tools via Letta Bridge. | `letta-bridge`, `agent_data` volume (optional). |

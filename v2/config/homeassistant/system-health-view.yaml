@@ -1,0 +1,32 @@
+title: System Health
+path: system-health
+icon: mdi:stethoscope
+cards:
+  - type: entities
+    title: Core Services
+    entities:
+      - sensor.orchestrator_config
+      - sensor.orchestrator_privacy_paused_total
+      - sensor.orchestrator_memory_pre_avg_ms
+      - sensor.orchestrator_memory_pre_slow_count
+      - sensor.orchestrator_context_characters_sum
+      - sensor.vision_router_queue_depth
+      - sensor.vision_router_lock_enabled
+      - sensor.vision_router_gpu0_util_percent
+      - sensor.vision_router_gpu0_mem_free_gb
+      - sensor.memory_total
+      - sensor.memory_pending
+      - sensor.memory_search_latency
+      - sensor.memory_additions_today
+  - type: entities
+    title: Switches
+    entities:
+      - switch.privacy_pause
+      - switch.vision_on
+      - switch.screen_watch_on
+  - type: history-graph
+    title: VL Requests
+    entities:
+      - sensor.vl_requests_today
+    hours_to_show: 24
+    refresh_interval: 60

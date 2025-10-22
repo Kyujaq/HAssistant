@@ -118,70 +118,68 @@ services:
       - ha_network
       - hassistant_v2_default
 
-  # PostgreSQL with pgvector for Letta memory
-  postgres:
-    image: pgvector/pgvector:pg15
-    container_name: hassistant-postgres
-    environment:
-      - POSTGRES_DB=hassistant
-      - POSTGRES_USER=hassistant
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./scripts:/docker-entrypoint-initdb.d:ro
-    ports:
-      - "5432:5432"  # Use 5433 to avoid conflict with /assistant postgres
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hassistant -d hassistant"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - ha_network
+  # # PostgreSQL with pgvector for Letta memory
+  # postgres:
+  #   image: pgvector/pgvector:pg15
+  #   container_name: hassistant-postgres
+  #   environment:
+  #     - POSTGRES_DB=hassistant
+  #     - POSTGRES_USER=hassistant
+  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+  #     - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #     - ./scripts:/docker-entrypoint-initdb.d:ro
+  #   ports:
+  #     - "5432:5432"  # Use 5433 to avoid conflict with /assistant postgres
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U hassistant -d hassistant"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - ha_network
 
-  # Redis for session cache and ephemeral data
-  redis:
-    image: redis:7-alpine
-    container_name: hassistant-redis
-    command: redis-server --appendonly yes --requirepass :gp9U0%o5>~Y1~'@Ntz528B(.£L4N,Qq59eE
-    volumes:
-      - redis_data:/data
-    ports:
-      - "6380:6379"  # Use 6380 to avoid conflict with /assistant redis
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-CHANGE_ME_STRONG_PASSWORD_REQUIRED}", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    networks:
-      - ha_network
+  # # Redis for session cache and ephemeral data
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: hassistant-redis
+  #   command: redis-server --appendonly yes --requirepass :gp9U0%o5>~Y1~'@Ntz528B(.£L4N,Qq59eE
+  #   volumes:
+  #     - redis_data:/data
+  #   ports:
+  #     - "6380:6379"  # Use 6380 to avoid conflict with /assistant redis
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-CHANGE_ME_STRONG_PASSWORD_REQUIRED}", "ping"]
+  #     interval: 10s
+  #     timeout: 3s
+  #     retries: 5
+  #   networks:
+  #     - ha_network
 
-  # Letta Bridge API
-  letta-bridge:
-    build: ./services/letta-bridge
-    container_name: hassistant-letta-bridge
-    env_file: .env
-    restart: unless-stopped
-    # FIX 1: Map the host port 8081 to the container's internal port 8000
-    ports:
-      - "8081:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      # FIX 2: The healthcheck must use the internal port 8000
-      test: ["CMD", "curl", "-f", "-H", "x-api-key: ${BRIDGE_API_KEY:-dev-key}", "http://localhost:8000/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    networks:
-      - ha_network
+  # # Letta Bridge API
+  # letta-bridge:
+  #   build: ./v2/services/letta-bridge
+  #   container_name: hassistant-letta-bridge
+  #   env_file: .env
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8081:8010"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "-H", "x-api-key: ${BRIDGE_API_KEY:-dev-key}", "http://localhost:8010/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 10s
+  #   networks:
+  #     - ha_network
 
   # PC Control Agent for AI orchestration
  # pc-control-agent:
@@ -206,7 +204,7 @@ services:
         dockerfile: Dockerfile
       container_name: hassistant-glados-orchestrator
       environment:
-        - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8000
+        - LETTA_BRIDGE_URL=http://hassistant-letta-bridge:8010
         - LETTA_API_KEY=${BRIDGE_API_KEY:-dev-key}
         - PORT=8082
         # Smart routing configuration

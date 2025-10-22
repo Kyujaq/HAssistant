@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import time
+import logging
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional
 
@@ -59,11 +60,65 @@ query_history = QueryHistory(limit=QUERY_HISTORY_SIZE)
 ingest_lock = asyncio.Lock()
 ingest_enabled = True
 
+logger = logging.getLogger(__name__)
+
+REQUIRED_COLUMNS = (
+    ("memories", "hash_id"),
+    ("memories", "updated_at"),
+)
+
+REQUIRED_UNIQUE_CONSTRAINTS = (
+    ("memories", "memories_hash_id_unique"),
+)
+
+REQUIRED_INDEXES = (
+    ("memories", "ix_memories_kind_created"),
+    ("memories", "ix_memories_hash"),
+    ("memories", "ix_mem_meta_role"),
+    ("memories", "ix_mem_meta_turn_id"),
+)
+
+
+async def _schema_guard() -> None:
+    missing: List[str] = []
+    async with db.get_conn() as conn:
+        for table, column in REQUIRED_COLUMNS:
+            cur = await conn.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = %s AND column_name = %s",
+                (table, column),
+            )
+            if await cur.fetchone() is None:
+                missing.append(f"column {table}.{column}")
+
+        for table, constraint in REQUIRED_UNIQUE_CONSTRAINTS:
+            cur = await conn.execute(
+                "SELECT 1 FROM information_schema.table_constraints WHERE table_schema = current_schema() AND table_name = %s AND constraint_name = %s",
+                (table, constraint),
+            )
+            if await cur.fetchone() is None:
+                missing.append(f"constraint {constraint} on {table}")
+
+        for table, index in REQUIRED_INDEXES:
+            cur = await conn.execute(
+                "SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND tablename = %s AND indexname = %s",
+                (table, index),
+            )
+            if await cur.fetchone() is None:
+                missing.append(f"index {index} on {table}")
+
+    if missing:
+        hint = "Run v2/scripts/05_memory_dedup.sql (memory-migrations service) to provision required schema."
+        detail = ", ".join(missing)
+        logger.error("Schema verification failed: %s", detail)
+        raise RuntimeError(f"Letta Bridge schema check failed: {detail}. {hint}")
+
+
 app = FastAPI(title="letta-bridge")
 
 
 @app.on_event("startup")
 async def startup() -> None:
+    await _schema_guard()
     app.state.http = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
 
 

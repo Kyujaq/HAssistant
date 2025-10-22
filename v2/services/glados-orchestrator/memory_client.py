@@ -55,6 +55,49 @@ class LRUCache:
 
 
 class MemoryClient:
+    async def add_agent_memory(self, agent_id: str, block: dict) -> dict:
+        """
+        Add a memory block to a Letta agent's archival memory.
+        Args:
+            agent_id: The Letta agent ID
+            block: Dict with memory block data (text, meta, etc.)
+        Returns:
+            Response dict from Letta
+        """
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"http://letta-server:8283/agents/{agent_id}/archival-memory",
+                    json=block
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            self._log_error_throttled("add_agent_memory", str(type(e).__name__), str(e))
+            return {"error": str(e)}
+
+    async def search_agent_memory(self, agent_id: str, query: str, top_k: int = 6) -> list:
+        """
+        Search an agent's archival memory blocks via Letta.
+        Args:
+            agent_id: The Letta agent ID
+            query: Search query string
+            top_k: Number of results to return
+        Returns:
+            List of matching memory blocks
+        """
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                params = {"q": query, "top_k": top_k}
+                response = await client.get(
+                    f"http://letta-server:8283/agents/{agent_id}/archival-memory/search",
+                    params=params
+                )
+                response.raise_for_status()
+                return response.json().get("results", [])
+        except Exception as e:
+            self._log_error_throttled("search_agent_memory", str(type(e).__name__), str(e))
+            return []
     """
     Async HTTP client for letta-bridge memory service.
 

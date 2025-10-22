@@ -104,9 +104,11 @@ Adds:
 - Indexes: `kind_created`, `hash`, `meta_role`, `meta_turn_id`
 
 **Apply**:
-```bash
-docker exec -i hassistant_v2_postgres psql -U glados -d glados < v2/scripts/05_memory_dedup.sql
-```
+- The v2 `docker-compose.yml` now ships a `memory-migrations` one-shot service that runs this script on every boot.
+- For an already running stack, trigger it manually:
+  ```bash
+  docker compose -f v2/docker-compose.yml run --rm memory-migrations
+  ```
 
 ### 2. Background Task Manager
 
