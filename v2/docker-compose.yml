@@ -2,8 +2,8 @@
 # Port Allocation:
 #   - 11434: ollama-chat (Hermes3 + Qwen3-4B)
 #   - 10300: wyoming_openai STT (Wyoming facade)
-#   - 10210: wyoming_openai TTS (proxy to Piper; avoids conflict with native piper)
-#   - 10200: wyoming-piper (native fallback TTS for A/B testing)
+#   - 10210: wyoming_openai TTS (proxy to Piper)
+#   - 10200: piper-main (GPU-accelerated TTS)
 #   - 8085:  wyoming_openai HTTP healthcheck/config API
 #
 # IMPORTANT: Verify GPU indices with `nvidia-smi --query-gpu=index,name --format=csv`
@@ -133,9 +133,6 @@ services:
       - ASR_URL=http://whisper-stt:8000/v1/audio/transcriptions
       - PRIMARY_TTS_HOST=${PRIMARY_TTS_HOST:-piper-main}
       - PRIMARY_TTS_PORT=${PRIMARY_TTS_PORT:-10200}
-      - FALLBACK_TTS_HOST=wyoming-piper
-      - FALLBACK_TTS_PORT=10200
-      - FALLBACK_TTS_URL=${FALLBACK_TTS_URL:-}
     ports:
       - "10300:10300"  # Wyoming STT (TCP bridge to Speaches)
       - "10210:10210"  # Wyoming TTS (TCP bridge to Speaches)
@@ -144,8 +141,6 @@ services:
       whisper-stt:
         condition: service_healthy
       piper-main:
-        condition: service_healthy
-      wyoming-piper:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
@@ -189,29 +184,6 @@ services:
       default:
         aliases: ["piper-main", "piper"]
 
-  # Wyoming Piper - native TTS fallback for A/B testing (CPU for reliability)
-  wyoming-piper:
-    image: rhasspy/wyoming-piper:latest
-    container_name: hassistant_v2_piper_fallback
-    command: --voice en_US-glados-medium --data-dir /data --download-dir /data --streaming
-    # No GPU - CPU fallback is more reliable for Piper ONNX
-    ports:
-      - "10200:10200"
-    volumes:
-      - ./services/piper_data:/data
-      - ./services/piper_data/voices.json:/app/lib/python3.10/dist-packages/wyoming_piper/voices.json
-      - ./services/piper_data/voices.json:/usr/local/lib/python3.11/dist-packages/wyoming_piper/voices.json
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/10200' || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    restart: on-failure:3
-    networks:
-      default:
-        aliases: ["wyoming-piper"]
-
   mediamtx:
     image: bluenviron/mediamtx:latest
     container_name: hassistant_v2_mediamtx
@@ -224,12 +196,15 @@ services:
     image: pgvector/pgvector:pg16
     container_name: hassistant_v2_pg
     environment:
+      TZ: ${TZ:-America/New_York}
       POSTGRES_DB: glados
       POSTGRES_USER: glados
       POSTGRES_PASSWORD: glados
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/00_init.sql:ro
+    ports:
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL","pg_isready -U glados -d glados"]
       interval: 10s
@@ -237,26 +212,20 @@ services:
       retries: 10
     restart: on-failure:3
 
-  memory-migrations:
-    image: pgvector/pgvector:pg16
-    container_name: hassistant_v2_mem_migrations
-    environment:
-      PGPASSWORD: glados
+  redis:
+    image: redis:7-alpine
+    container_name: hassistant_v2_redis
+    command: redis-server --appendonly yes --requirepass glados_redis_pass_change_me
     volumes:
-      - ./scripts/05_memory_dedup.sql:/migrations/05_memory_dedup.sql:ro
-    command:
-      - psql
-      - -h
-      - postgres
-      - -U
-      - glados
-      - -d
-      - glados
-      - -f
-      - /migrations/05_memory_dedup.sql
-    depends_on:
-      postgres: { condition: service_healthy }
-    restart: "no"
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "glados_redis_pass_change_me", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: on-failure:3
 
   memory-embed:
     build: { context: ./services/memory-embed }
@@ -267,7 +236,6 @@ services:
       - TOP_K=8
     depends_on:
       postgres: { condition: service_healthy }
-      memory-migrations: { condition: service_completed_successfully }
     ports:
       - "8001:8001"
     volumes:
@@ -298,6 +266,28 @@ services:
   #     retries: 5
   #   restart: on-failure:3
 
+  # S2P Gate - Speech-to-Phrase fast command routing
+  s2p-gate:
+    build: { context: ./services/s2p-gate }
+    container_name: hassistant_v2_s2p_gate
+    environment:
+      - PHRASES_FILE=/app/phrases.yaml
+      - CONFIDENCE_THRESHOLD=${S2P_CONFIDENCE_THRESHOLD:-0.85}
+      - DEFAULT_LOCALE=${S2P_LOCALE:-en}
+      - LOG_LEVEL=INFO
+      - PORT=8083
+    volumes:
+      - ./services/s2p-gate/phrases.yaml:/app/phrases.yaml:ro
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8083/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
+    restart: on-failure:3
+
   # GLaDOS Orchestrator - Memory-aware chat service with intelligent routing
   orchestrator:
     build: { context: ./services/glados-orchestrator }
@@ -310,6 +300,8 @@ services:
               capabilities: [utility]
               device_ids: ['all']
     environment:
+      # Timezone
+      - TZ=${TZ:-America/New_York}
       # Text models (GTX 1070)
       - OLLAMA_TEXT_URL=http://ollama-text:11434
       - OLLAMA_TEXT_MODEL=qwen3:4b                # Deeper text fallback
@@ -327,8 +319,8 @@ services:
       - VL_TEXT_TOKEN_LIMIT=768                   # Cap VL text tokens
       - VISION_ROUTER_URL=${VISION_ROUTER_URL:-http://192.168.122.71:8050}
       - VISION_GATEWAY_URL=${VISION_GATEWAY_URL:-http://192.168.122.71:8051}
-      - HA_BASE_URL=${HA_BASE_URL:-http://assistant-ha:8123}
-      - HA_TOKEN=${HA_TOKEN:-}
+      - HA_BASE_URL=https://hassistant-homeassistant:8123
+      - HA_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI5MDI5ZTA1YTIzMTM0ZDUxOTQ4MjAzZjAzYjVjM2U2YyIsImlhdCI6MTc2MTE3ODczMSwiZXhwIjoyMDc2NTM4NzMxfQ.GcPdOJZrfQ0rtRRj2hv9IgXM-gVQH0cKw7uV2Cd_8hA
       # Memory configuration
       - MEMORY_URL=http://192.168.2.13:8283
       - MEMORY_AUTOSAVE_ON=1
@@ -339,20 +331,46 @@ services:
       - MEMORY_CACHE_SIZE=50
       - MEMORY_CONNECT_TIMEOUT=2.0
       - MEMORY_READ_TIMEOUT=6.0
-      # Realtime configuration
+      # Letta configuration
+      - LETTA_SERVER_URL=http://letta-server:8283
+      - LETTA_API_KEY=${LETTA_API_KEY}
+      - LETTA_AGENT_ID=${LETTA_AGENT_ID}
+      - ORCH_BASE_URL=http://orchestrator:8082
+      # S2P configuration
+      - S2P_URL=http://s2p-gate:8083
+      - S2P_CONFIDENCE_THRESHOLD=${S2P_CONFIDENCE_THRESHOLD:-0.85}
+      - S2P_LOCALE=${S2P_LOCALE:-en}
+      # Redis configuration
+      - "REDIS_URL=redis://:glados_redis_pass_change_me@redis:6379"
+      - "REDIS_FACTS_PREFIX=facts:"
+      # Parallel ack configuration
+      - ACK_MODEL=hermes3:latest
+      - ACK_MAX_TOKENS=64
+      - ACK_TIMEOUT_MS=3000
+      # Realtime/TTS configuration
       - ENABLE_REALTIME_STREAMING=${ENABLE_REALTIME_STREAMING:-0}
       - REALTIME_CONNECT_TIMEOUT=${REALTIME_CONNECT_TIMEOUT:-2.0}
       - REALTIME_READ_TIMEOUT=${REALTIME_READ_TIMEOUT:-30.0}
       - REALTIME_SESSION_TTL=${REALTIME_SESSION_TTL:-30.0}
+      - BARGE_IN_ENABLED=true
+      - BARGE_IN_DEBOUNCE_MS=150
+      - "REALTIME_FLUSH_MARKERS=.?!\\n"
     depends_on:
-      ollama-text: { condition: service_healthy }
-      ollama-vl: { condition: service_healthy }
-      #letta-bridge: { condition: service_healthy }
-      memory-embed: { condition: service_healthy }
+      ollama-text:
+        condition: service_healthy
+      ollama-vl:
+        condition: service_healthy
+      memory-embed:
+        condition: service_healthy
+      s2p-gate:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
-      - "8021:8020"
+      - "8082:8020"
     volumes:
       - orch_state:/app/state
+      - ./config/ha/entities.yaml:/app/config/ha/entities.yaml:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8020/health')"]
       interval: 30s
@@ -360,26 +378,6 @@ services:
       retries: 5
       start_period: 10s
     restart: on-failure:3
-
-  memory-backfill:
-    build:
-      context: .
-      dockerfile: services/memory-backfill/Dockerfile
-    container_name: hassistant_v2_memory_backfill
-    working_dir: /app
-    environment:
-      - DATABASE_URL=postgresql://glados:glados@postgres:5432/glados
-      - MEMORY_URL=http://memory-embed:8001
-    volumes:
-      - ./scripts:/app/scripts
-      - ./state:/app/state
-      - ./v1:/app/v1:ro
-      - ./sample_data:/app/sample_data:ro
-    command: ["--resume", "state/backfill.json"]
-    depends_on:
-      memory-embed: { condition: service_healthy }
-      postgres: { condition: service_healthy }
-    restart: "no"
 
   dozzle:
     image: ghcr.io/amir20/dozzle:latest
@@ -399,31 +397,34 @@ services:
       default:
         aliases: ["dozzle"]
 
-  # NVIDIA GPU stats to Home Assistant via MQTT
 
   letta-server:
-    image: lettaai/letta:latest
+    image: letta/letta:latest
     container_name: hassistant_v2_letta_server
+    restart: unless-stopped
     environment:
-      - POSTGRES_DB=letta
-      - POSTGRES_USER=glados
-      - POSTGRES_PASSWORD=glados
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - OLLAMA_BASE_URL=http://ollama-text:11434
-    depends_on:
-      - postgres
+      - TZ=${TZ:-America/New_York}
+      - LETTA_API_KEY=${LETTA_API_KEY}
+      - HA_BASE_URL=http://192.168.2.13:8123
+      - HA_TOKEN=${HA_TOKEN}
+      - ORCH_BASE_URL=http://glados-orchestrator:8082
+      - SEARX_URL=http://searxng:8084/search
+      - READABILITY_URL=http://readability:8086/read
+      - DOC_INDEX_URL=http://doc-index:8087/search
+    volumes:
+      - /home/qjaq/.letta/.persist/pgdata:/var/lib/postgresql/data
     ports:
-      - "8083:8083"
-      - "8283:8283"
-    restart: on-failure:3
+      - "8081:8283"
+    networks:
+      - default
 
+  # NVIDIA GPU stats to Home Assistant via MQTT
   smi2mqtt:
     build:
       context: ./services/smi2mqtt/smi2mqtt
     container_name: hassistant_v2_smi2mqtt
     environment:
-      - TZ=EST
+      - TZ=${TZ:-America/New_York}
     volumes:
       - ./services/smi2mqtt/data:/opt/smi2mqtt
     restart: unless-stopped
@@ -434,6 +435,87 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: hassistant_v2_prometheus
+    restart: unless-stopped
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/alerting/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "9090:9090"
+    networks: [ default ]
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hassistant_v2_grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=glados
+      - GF_SERVER_DOMAIN=localhost
+    depends_on: [ prometheus ]
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config/grafana/provisioning/:/etc/grafana/provisioning/:ro
+      - ./config/grafana/dashboards/:/var/lib/grafana/dashboards/:ro
+    networks: [ default ]
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: hassistant_v2_alertmanager
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./config/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    networks: [ default ]
+    depends_on: [ prometheus ]
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: hassistant_v2_searxng
+    restart: unless-stopped
+    environment:
+      - BASE_URL=http://searxng:8084
+      - SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml
+    volumes:
+      - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    ports:
+      - "8084:8080"
+    networks: [ default ]
+
+  readability:
+    build:
+      context: ./services/readability
+    container_name: hassistant_v2_readability
+    restart: unless-stopped
+    environment:
+      - WEB_ALLOWLIST=${WEB_ALLOWLIST}
+      - READABILITY_TIMEOUT_MS=5000
+      - READABILITY_SIZE_LIMIT=1500000
+    ports:
+      - "8086:8086"
+    networks: [ default ]
+
+  doc-index:
+    build:
+      context: ./services/doc-index
+    container_name: hassistant_v2_docindex
+    restart: unless-stopped
+    environment:
+      - DOC_INDEX_DB=${DOC_INDEX_DB}
+      - DOC_INDEX_PATHS=${DOC_INDEX_PATHS}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+    volumes:
+      - /home/qjaq/Documents:/mnt/docs:ro
+      - ./data/docindex:/var/lib/docindex
+    ports:
+      - "8087:8087"
+    networks: [ default ]
 
 volumes:
   ollama_text_data:
@@ -452,6 +534,8 @@ volumes:
     name: hassistant_v2_tailscale_run
   pgdata:
     name: hassistant_v2_pgdata
+  redis_data:
+    name: hassistant_v2_redis_data
   memembed_cache:
     name: hassistant_v2_memembed_cache  # Cache for embedding model
   orch_state:

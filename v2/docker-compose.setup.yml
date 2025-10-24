@@ -1,0 +1,51 @@
+# One-time setup services for HAssistant v2
+# Run these manually when needed:
+#   docker compose -f docker-compose.setup.yml up memory-migrations
+#   docker compose -f docker-compose.setup.yml up memory-backfill
+
+name: hassistant_v2_setup
+
+services:
+  memory-migrations:
+    image: pgvector/pgvector:pg16
+    container_name: hassistant_v2_mem_migrations
+    environment:
+      PGPASSWORD: glados
+    volumes:
+      - ./scripts/05_memory_dedup.sql:/migrations/05_memory_dedup.sql:ro
+    command:
+      - psql
+      - -h
+      - postgres
+      - -U
+      - glados
+      - -d
+      - glados
+      - -f
+      - /migrations/05_memory_dedup.sql
+    restart: "no"
+    networks:
+      - hassistant_v2_default
+
+  memory-backfill:
+    build:
+      context: .
+      dockerfile: services/memory-backfill/Dockerfile
+    container_name: hassistant_v2_memory_backfill
+    working_dir: /app
+    environment:
+      - DATABASE_URL=postgresql://glados:glados@postgres:5432/glados
+      - MEMORY_URL=http://memory-embed:8001
+    volumes:
+      - ./scripts:/app/scripts
+      - ./state:/app/state
+      - ./v1:/app/v1:ro
+      - ./sample_data:/app/sample_data:ro
+    command: ["--resume", "state/backfill.json"]
+    restart: "no"
+    networks:
+      - hassistant_v2_default
+
+networks:
+  hassistant_v2_default:
+    external: true
