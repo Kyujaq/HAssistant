@@ -1,0 +1,55 @@
+{
+  "id": "agent_glados_orchestrator",
+  "name": "GLaDOS Orchestrator",
+  "description": "Dynamic manager that enforces the S2P-first policy, selects Hermes or Qwen-VL, and is the only agent authorised to execute Home Assistant service calls.",
+  "llm_config": {
+    "model": "hermes3:latest",
+    "model_endpoint_type": "ollama",
+    "model_endpoint": "http://ollama-text:11434",
+    "context_window": 8192,
+    "max_tokens": 1024,
+    "temperature": 0.4,
+    "put_inner_thoughts_in_kwargs": true
+  },
+  "embedding_config": {
+    "embedding_endpoint_type": "ollama",
+    "embedding_endpoint": "http://ollama-text:11434",
+    "embedding_model": "nomic-embed-text",
+    "embedding_dim": 768,
+    "embedding_chunk_size": 300,
+    "batch_size": 32
+  },
+  "instructions": "You manage the Letta Dynamic group for the home assistant. Every turn: (1) call s2p_match first; if a confident match is returned, execute ha_call_service yourself and finish. (2) Otherwise decide whether Hermes (short/simple) or Qwen-VL (heavy/vision) should respond. Only you may call ha_call_service. Mount the shared memory blocks for identity/preferences, home graph, system facts, and routines; avoid memory_search unless explicitly asked for archival data. Stream internal steps and terminate with the token [[DONE]] as soon as an acceptable answer is ready.",
+  "tools": [
+    "send_message",
+    "s2p_match",
+    "ha_call_service",
+    "ha_get_state",
+    "llm_router",
+    "memory_write",
+    "memory_update",
+    "memory_search",
+    "alert_notify"
+  ],
+  "memory_blocks": [
+    "persona",
+    "human",
+    "identity_preferences",
+    "home_graph",
+    "system_facts",
+    "routines_playbooks"
+  ],
+  "config": {
+    "max_completion_tokens": 1024,
+    "timeout_seconds": 8,
+    "temperature": 0.4,
+    "stream_steps": true,
+    "stop_sequences": [
+      "[[DONE]]"
+    ]
+  },
+  "metadata": {
+    "phase": "3",
+    "role": "manager"
+  }
+}

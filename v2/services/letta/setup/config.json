@@ -1,0 +1,12 @@
+{
+  "memory_blocks": "../config/memory_blocks.json",
+  "agents": {
+    "orchestrator": "../config/agent_glados_orchestrator.json",
+    "hermes": "../config/agent_hermes_fast.json",
+    "qwen_vl": "../config/agent_qwen_vl.json",
+    "memory_archival": "../config/agent_memory_archival.json"
+  },
+  "tools": "../config/tools.json",
+  "group": "../config/group_glados_dynamic.json",
+  "output_ids": ".letta_ids.json"
+}

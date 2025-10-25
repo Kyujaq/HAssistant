@@ -1,0 +1,65 @@
+[
+  {
+    "function_name": "s2p_match",
+    "description": "Call the S2P gate to match a transcript against fast-path intents.",
+    "tags": ["glados", "s2p"],
+    "pip_requirements": [{"name": "requests"}],
+    "source_code": "import os\nimport requests\n\nS2P_URL = os.getenv('S2P_URL', 'http://s2p-gate:8083/match')\n\n\ndef s2p_match(text: str, turn_id: str = None, locale: str = None) -> dict:\n    \"\"\"Match a transcript using the S2P fast-path service.\n\n    Args:\n        text: User transcript to evaluate.\n        turn_id: Optional turn identifier for tracing.\n        locale: Optional locale hint (defaults to server configuration).\n    \"\"\"\n    if not text:\n        raise ValueError('text is required')\n    payload: dict = {'text': text}\n    if turn_id:\n        payload['turn_id'] = turn_id\n    if locale:\n        payload['locale'] = locale\n    response = requests.post(S2P_URL, json=payload, timeout=5)\n    response.raise_for_status()\n    return response.json()\n"
+  },
+  {
+    "function_name": "ha_call_service",
+    "description": "Invoke a Home Assistant service via the REST API.",
+    "tags": ["glados", "homeassistant"],
+    "pip_requirements": [{"name": "requests"}],
+    "source_code": "import os\nimport requests\n\nHA_BASE_URL = os.getenv('HA_BASE_URL', 'http://assistant-ha:8123')\nHA_TOKEN = os.getenv('HA_TOKEN')\n\n\ndef ha_call_service(domain: str, service: str, data: dict = None) -> dict:\n    \"\"\"Call a Home Assistant service synchronously.\n\n    Args:\n        domain: HA domain (e.g. 'light').\n        service: Service name (e.g. 'turn_on').\n        data: Optional service payload.\n    \"\"\"\n    if not domain or not service:\n        raise ValueError('domain and service are required')\n    url = f\"{HA_BASE_URL.rstrip('/')}/api/services/{domain}/{service}\"\n    headers = {'Content-Type': 'application/json'}\n    if HA_TOKEN:\n        headers['Authorization'] = f'Bearer {HA_TOKEN}'\n    response = requests.post(url, json=data or {}, headers=headers, timeout=10)\n    response.raise_for_status()\n    try:\n        return response.json()\n    except ValueError:\n        return {'status': 'ok'}\n"
+  },
+  {
+    "function_name": "ha_get_state",
+    "description": "Fetch the current state of a Home Assistant entity.",
+    "tags": ["glados", "homeassistant"],
+    "pip_requirements": [{"name": "requests"}],
+    "source_code": "import os\nimport requests\n\nHA_BASE_URL = os.getenv('HA_BASE_URL', 'http://assistant-ha:8123')\nHA_TOKEN = os.getenv('HA_TOKEN')\n\n\ndef ha_get_state(entity_id: str) -> dict:\n    \"\"\"Retrieve a Home Assistant entity state.\n\n    Args:\n        entity_id: Fully qualified entity id (e.g. light.kitchen).\n    \"\"\"\n    if not entity_id:\n        raise ValueError('entity_id is required')\n    url = f\"{HA_BASE_URL.rstrip('/')}/api/states/{entity_id}\"\n    headers = {'Content-Type': 'application/json'}\n    if HA_TOKEN:\n        headers['Authorization'] = f'Bearer {HA_TOKEN}'\n    response = requests.get(url, headers=headers, timeout=10)\n    response.raise_for_status()\n    return response.json()\n"
+  },
+  {
+    "function_name": "llm_router",
+    "description": "Route a chat completion request through the local LLM router.",
+    "tags": ["glados", "llm"],
+    "pip_requirements": [{"name": "requests"}],
+    "source_code": "import os\nimport requests\n\nROUTER_URL = os.getenv('LLM_ROUTER_URL', 'http://llm-router:8052/v1/chat/completions')\nDEFAULT_MODEL = os.getenv('LLM_ROUTER_DEFAULT_MODEL', 'hermes3')\n\n\ndef llm_router(messages: list, model: str = None, temperature: float = None, max_tokens: int = None, stream: bool = False) -> dict:\n    \"\"\"Forward an OpenAI-compatible chat request to the router service.\n\n    Args:\n        messages: List of OpenAI-style message dicts.\n        model: Optional target model hint.\n        temperature: Optional sampling temperature.\n        max_tokens: Optional response token cap.\n        stream: Whether to request a streaming response.\n    \"\"\"\n    if not messages:\n        raise ValueError('messages is required')\n    payload = {'model': model or DEFAULT_MODEL, 'messages': messages}\n    if temperature is not None:\n        payload['temperature'] = temperature\n    if max_tokens is not None:\n        payload['max_tokens'] = max_tokens\n    if stream:\n        payload['stream'] = True\n    response = requests.post(ROUTER_URL, json=payload, timeout=30)\n    response.raise_for_status()\n    return response.json()\n"
+  },
+  {
+    "function_name": "memory_write",
+    "description": "Write a memory block into the embedding service.",
+    "tags": ["glados", "memory"],
+    "pip_requirements": [{"name": "requests"}],
+    "source_code": "import os\nimport requests\n\nMEMORY_URL = os.getenv('MEMORY_URL', 'http://memory-embed:8001')\n\n\ndef memory_write(text: str, kind: str = 'note', source: str = 'agent', meta: dict = None, memory_id: str = None) -> dict:\n    \"\"\"Persist text into the memory embedding store.\n\n    Args:\n        text: Content to store.\n        kind: Memory kind label.\n        source: Logical source label.\n        meta: Optional metadata dict.\n        memory_id: Optional existing identifier for upsert.\n    \"\"\"\n    if not text:\n        raise ValueError('text is required')\n    url = f\"{MEMORY_URL.rstrip('/')}/upsert\"\n    payload = {'text': text, 'kind': kind, 'source': source, 'meta': meta or {}}\n    if memory_id:\n        payload['id'] = memory_id\n    response = requests.post(url, json=payload, timeout=10)\n    response.raise_for_status()\n    return response.json()\n"
+  },
+  {
+    "function_name": "memory_update",
+    "description": "Update an existing memory entry by id.",
+    "tags": ["glados", "memory"],
+    "pip_requirements": [{"name": "requests"}],
+    "source_code": "import os\nimport requests\n\nMEMORY_URL = os.getenv('MEMORY_URL', 'http://memory-embed:8001')\n\n\ndef memory_update(memory_id: str, text: str, kind: str = 'note', source: str = 'agent', meta: dict = None) -> dict:\n    \"\"\"Update an existing memory entry (same contract as memory_write).\n\n    Args:\n        memory_id: Identifier returned by memory_write that should be updated.\n        text: New content that replaces the previous memory text.\n        kind: Optional classification label for the memory (defaults to 'note').\n        source: Optional logical source label for auditing (defaults to 'agent').\n        meta: Optional metadata dictionary stored alongside the memory.\n    \"\"\"\n    if not memory_id:\n        raise ValueError('memory_id is required')\n    if not text:\n        raise ValueError('text is required')\n    url = f\"{MEMORY_URL.rstrip('/')}/upsert\"\n    payload = {'id': memory_id, 'text': text, 'kind': kind, 'source': source, 'meta': meta or {}}\n    response = requests.post(url, json=payload, timeout=10)\n    response.raise_for_status()\n    return response.json()\n"
+  },
+  {
+    "function_name": "memory_search",
+    "description": "Run a semantic search against the embedding store.",
+    "tags": ["glados", "memory"],
+    "pip_requirements": [{"name": "requests"}],
+    "source_code": "import os\nimport requests\n\nMEMORY_URL = os.getenv('MEMORY_URL', 'http://memory-embed:8001')\n\n\ndef memory_search(query: str, top_k: int = 5) -> dict:\n    \"\"\"Search the memory embedding store.\n\n    Args:\n        query: Natural language query string.\n        top_k: Number of results to return.\n    \"\"\"\n    if not query:\n        raise ValueError('query is required')\n    url = f\"{MEMORY_URL.rstrip('/')}/search\"\n    payload = {'q': query, 'top_k': top_k}\n    response = requests.post(url, json=payload, timeout=10)\n    response.raise_for_status()\n    return response.json()\n"
+  },
+  {
+    "function_name": "vision_analyze",
+    "description": "Send an image URL to the vision analysis service (if configured).",
+    "tags": ["glados", "vision"],
+    "pip_requirements": [{"name": "requests"}],
+    "source_code": "import os\nimport requests\n\nVISION_ANALYZE_URL = os.getenv('VISION_ANALYZE_URL')\nDEFAULT_PROMPT = os.getenv('VISION_DEFAULT_PROMPT', 'Describe the most important details in the image.')\n\ndef vision_analyze(image_url: str, prompt: str = None, meta: dict = None) -> dict:\n    \"\"\"Send an image URL to the configured vision analysis endpoint.\n\n    Args:\n        image_url: Publicly reachable image URL to analyze.\n        prompt: Optional text prompt guiding the analysis.\n        meta: Optional metadata dictionary forwarded to the service.\n    \"\"\"\n    if not image_url:\n        raise ValueError('image_url is required')\n    if not VISION_ANALYZE_URL:\n        return {'status': 'unconfigured', 'image_url': image_url, 'prompt': prompt or DEFAULT_PROMPT, 'meta': meta or {}}\n    payload = {'image_url': image_url, 'prompt': prompt or DEFAULT_PROMPT, 'meta': meta or {}}\n    response = requests.post(VISION_ANALYZE_URL, json=payload, timeout=20)\n    response.raise_for_status()\n    try:\n        return response.json()\n    except ValueError:\n        return {'status': 'ok'}\n"
+  },
+  {
+    "function_name": "alert_notify",
+    "description": "Send a notification to the configured webhook (if any).",
+    "tags": ["glados", "alerts"],
+    "pip_requirements": [{"name": "requests"}],
+    "source_code": "import os\nimport requests\n\nALERT_URL = os.getenv('ALERT_WEBHOOK_URL')\n\n\ndef alert_notify(message: str, severity: str = 'info', data: dict = None) -> dict:\n    \"\"\"Send a notification payload to the configured webhook.\n\n    Args:\n        message: Human readable message.\n        severity: Severity label (info|warn|critical).\n        data: Optional structured payload.\n    \"\"\"\n    payload = {'message': message, 'severity': severity, 'data': data or {}}\n    if ALERT_URL:\n        response = requests.post(ALERT_URL, json=payload, timeout=5)\n        response.raise_for_status()\n        try:\n            return response.json()\n        except ValueError:\n            return {'status': 'sent'}\n    return {'status': 'no_webhook', 'payload': payload}\n"
+  }
+]

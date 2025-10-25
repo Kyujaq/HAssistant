@@ -1,0 +1,47 @@
+{
+  "id": "agent_hermes_fast",
+  "name": "Hermes Fast Responder",
+  "description": "Handles short, routine Home Assistant queries using the shared memory blocks without external retrieval.",
+  "llm_config": {
+    "model": "hermes3:latest",
+    "model_endpoint_type": "ollama",
+    "model_endpoint": "http://ollama-text:11434",
+    "context_window": 8192,
+    "max_tokens": 512,
+    "temperature": 0.3,
+    "put_inner_thoughts_in_kwargs": true
+  },
+  "embedding_config": {
+    "embedding_endpoint_type": "ollama",
+    "embedding_endpoint": "http://ollama-text:11434",
+    "embedding_model": "nomic-embed-text",
+    "embedding_dim": 768,
+    "embedding_chunk_size": 300,
+    "batch_size": 32
+  },
+  "instructions": "You are the fast responder in the Dynamic group. Provide concise answers for day-to-day voice queries, relying on the mounted memory blocks. Do not call ha_call_service; instead recommend the action for the orchestrator to perform. Keep completions brief and stream tokens quickly.",
+  "tools": [
+    "send_message",
+    "s2p_match",
+    "memory_write",
+    "memory_update"
+  ],
+  "memory_blocks": [
+    "persona",
+    "human",
+    "identity_preferences",
+    "home_graph",
+    "system_facts",
+    "routines_playbooks"
+  ],
+  "config": {
+    "max_completion_tokens": 512,
+    "timeout_seconds": 2,
+    "temperature": 0.3,
+    "stream_steps": false
+  },
+  "metadata": {
+    "phase": "3",
+    "role": "participant"
+  }
+}

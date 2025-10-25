@@ -1,0 +1,27 @@
+{
+  "id": "group_glados_dynamic",
+  "name": "GLaDOS Dynamic Group",
+  "type": "dynamic",
+  "manager_id": "agent_glados_orchestrator",
+  "agent_ids": [
+    "agent_glados_orchestrator",
+    "agent_hermes_fast",
+    "agent_qwen_vl",
+    "agent_memory_archival"
+  ],
+  "participant_ids": [
+    "agent_hermes_fast",
+    "agent_qwen_vl",
+    "agent_memory_archival"
+  ],
+  "description": "Dynamic Letta group coordinating Hermes (fast) and Qwen-VL (vision) with shared memory blocks.",
+  "config": {
+    "termination_token": "[[DONE]]",
+    "max_turns": 4,
+    "stream_steps": true
+  },
+  "metadata": {
+    "phase": "3",
+    "notes": "Hermes handles short/simple, Qwen-VL manages heavy/vision, Memory agent runs during sleep-time windows."
+  }
+}

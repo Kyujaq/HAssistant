@@ -1,0 +1,46 @@
+{
+  "id": "agent_memory_archival",
+  "name": "Memory Archival Specialist",
+  "description": "Background participant that runs during sleep-time to compress live blocks and move aged data into archival storage.",
+  "llm_config": {
+    "model": "hermes3:latest",
+    "model_endpoint_type": "ollama",
+    "model_endpoint": "http://ollama-text:11434",
+    "context_window": 8192,
+    "max_tokens": 512,
+    "temperature": 0.1,
+    "put_inner_thoughts_in_kwargs": true
+  },
+  "embedding_config": {
+    "embedding_endpoint_type": "ollama",
+    "embedding_endpoint": "http://ollama-text:11434",
+    "embedding_model": "nomic-embed-text",
+    "embedding_dim": 768,
+    "embedding_chunk_size": 300,
+    "batch_size": 32
+  },
+  "instructions": "Operate off the critical path during scheduled sleep-time windows. Summarise recent events into tighter memory blocks, prune stale entries, and coordinate archival writes to the S3-compatible store. Never respond directly to the user.",
+  "tools": [
+    "memory_write",
+    "memory_update",
+    "memory_search"
+  ],
+  "memory_blocks": [
+    "persona",
+    "human",
+    "identity_preferences",
+    "home_graph",
+    "system_facts",
+    "routines_playbooks"
+  ],
+  "config": {
+    "max_completion_tokens": 1024,
+    "timeout_seconds": 10,
+    "temperature": 0.0,
+    "stream_steps": false
+  },
+  "metadata": {
+    "phase": "6",
+    "role": "background"
+  }
+}
