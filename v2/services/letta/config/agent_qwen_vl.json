@@ -5,7 +5,7 @@
   "llm_config": {
     "model": "qwen2.5vl:7b",
     "model_endpoint_type": "ollama",
-    "model_endpoint": "http://ollama-vl:11434",
+    "model_endpoint": "http://ollama-vl:11434/v1",
     "context_window": 4096,
     "max_tokens": 1024,
     "temperature": 0.2,
@@ -13,7 +13,7 @@
   },
   "embedding_config": {
     "embedding_endpoint_type": "ollama",
-    "embedding_endpoint": "http://ollama-text:11434",
+    "embedding_endpoint": "http://ollama-text:11434/v1",
     "embedding_model": "nomic-embed-text",
     "embedding_dim": 768,
     "embedding_chunk_size": 300,

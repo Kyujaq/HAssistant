@@ -15,12 +15,7 @@ COPY patches/async_composio_toolset.py /app/letta/functions/async_composio_tools
 COPY patches/constants.py /tmp/constants_patch.py
 RUN cat /tmp/constants_patch.py >> /app/letta/constants.py
 
-# Patch Agent.load_last_function_response to fix TypeError on coroutines
-COPY patches/agent_load_last_function_response.py /tmp/agent_patch_method.py
-RUN python3 -c "import re; \
-content = open('/app/letta/agent.py').read(); \
-replacement = open('/tmp/agent_patch_method.py').read(); \
-pattern = r'(    def load_last_function_response\(self\):.*?)(\n    def )'; \
-content = re.sub(pattern, replacement + r'\\2', content, flags=re.DOTALL); \
-open('/app/letta/agent.py', 'w').write(content); \
-print('[PATCH] Patched Agent.load_last_function_response')"
+# NEW: run_id compatibility shim + agent.py with import swap
+# Fixes: TypeError: convert_message_creates_to_messages() missing 1 required positional argument: 'run_id'
+COPY patches/message_helper_compat.py /app/letta/helpers/message_helper_compat.py
+COPY patches/agent.py /app/letta/agent.py
