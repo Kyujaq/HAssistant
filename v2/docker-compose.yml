@@ -399,7 +399,7 @@ services:
 
 
   letta-server:
-    image: letta/letta:latest
+    image: glados/letta:0.13.0-patched
     container_name: hassistant_v2_letta_server
     restart: unless-stopped
     environment:
@@ -515,6 +515,33 @@ services:
       - ./data/docindex:/var/lib/docindex
     ports:
       - "8087:8087"
+    networks: [ default ]
+
+  llm-router:
+    build:
+      context: ./services/llm-router
+    container_name: hassistant_v2_llm_router
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-America/Toronto}
+      - OLLAMA_URL=http://ollama-text:11434
+      - HERMES_MODEL=hermes3:latest
+      - QWEN_MODEL=qwen3:4b
+      - HERMES_TOKEN_CEILING=700
+      - MAX_USER_TOKENS=512
+      - OLLAMA_TIMEOUT_S=4.0
+      - ROUTER_TOTAL_SLA_S=8.0
+      - PORT=8052
+    depends_on:
+      - ollama-text
+    ports:
+      - "8052:8052"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8052/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks: [ default ]
 
 volumes:

@@ -1,0 +1,28 @@
+{
+  "memory_blocks": {
+    "identity_preferences": "block-3087d916-6ab3-4eb0-8264-0a4e0b561cf1",
+    "home_graph": "block-cf649a34-8308-43a8-8ed2-8f7d24ab9dcf",
+    "system_facts": "block-2256f63f-ce3a-4eb0-9fc7-a92176647a49",
+    "routines_playbooks": "block-0295cac1-b687-4e4b-8988-218e1214933a"
+  },
+  "tools": {
+    "s2p_match": "tool-fe14216e-9b37-47af-a634-e8f5778d248f",
+    "ha_call_service": "tool-53c22d53-ab49-4291-86c3-cbf06db06bb9",
+    "ha_get_state": "tool-5f920da4-9513-44c8-bb06-4ef73be9c20e",
+    "llm_router": "tool-dfaee5fe-00e0-4c9e-9c74-1d8cddcbef40",
+    "memory_write": "tool-4a332bcf-ccea-43c1-82d8-179d279aa053",
+    "memory_update": "tool-3bdcae90-a597-43ff-879c-160be683a4e8",
+    "memory_search": "tool-bf1db105-98b7-4d46-8e70-d4d8a4a1d387",
+    "vision_analyze": "tool-ee4caf55-588e-4783-9e98-e2ffb8c15097",
+    "alert_notify": "tool-c63f1d47-477e-4107-8912-4833b5c05cde"
+  },
+  "agents": {
+    "orchestrator": "agent-51220cc3-4648-4096-9bf2-c2484ef15571",
+    "hermes": "agent-bac1c526-2cbb-4345-a0c5-72273840b62d",
+    "qwen_vl": "agent-91e53e62-af82-43a6-b21b-fc2cdacf79e3",
+    "memory_archival": "agent-04732641-9a02-4ff6-804f-d35419f43b39"
+  },
+  "group": {
+    "GLaDOS Dynamic Group": "group-2d3ffa80-8c3a-43b5-b6bf-499814e8c79e"
+  }
+}

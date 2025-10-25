@@ -1,0 +1,26 @@
+FROM letta/letta:0.13.0
+
+# NEW: Utility module for async stream collection
+COPY patches/_group_stream_utils.py /app/letta/groups/_group_stream_utils.py
+
+# Patch multi-agent files (missing imports for step_stream + character limit fixes)
+COPY patches/round_robin_multi_agent.py /app/letta/groups/round_robin_multi_agent.py
+COPY patches/dynamic_multi_agent.py /app/letta/groups/dynamic_multi_agent.py
+
+# Patch composio files (make composio imports optional)
+COPY patches/composio_helpers.py /app/letta/functions/composio_helpers.py
+COPY patches/async_composio_toolset.py /app/letta/functions/async_composio_toolset.py
+
+# Patch constants.py (add missing COMPOSIO constants)
+COPY patches/constants.py /tmp/constants_patch.py
+RUN cat /tmp/constants_patch.py >> /app/letta/constants.py
+
+# Patch Agent.load_last_function_response to fix TypeError on coroutines
+COPY patches/agent_load_last_function_response.py /tmp/agent_patch_method.py
+RUN python3 -c "import re; \
+content = open('/app/letta/agent.py').read(); \
+replacement = open('/tmp/agent_patch_method.py').read(); \
+pattern = r'(    def load_last_function_response\(self\):.*?)(\n    def )'; \
+content = re.sub(pattern, replacement + r'\\2', content, flags=re.DOTALL); \
+open('/app/letta/agent.py', 'w').write(content); \
+print('[PATCH] Patched Agent.load_last_function_response')"

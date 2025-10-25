@@ -1,0 +1,5 @@
+# Added defaults for missing COMPOSIO constants required by letta.agent import
+COMPOSIO_ENTITY_ENV_VAR_KEY = "COMPOSIO_ENTITY"
+COMPOSIO_PROJECT_ENV_VAR_KEY = "COMPOSIO_PROJECT"
+COMPOSIO_DEFAULT_ENTITY_NAME = "default"
+COMPOSIO_DEFAULT_PROJECT_NAME = "default"

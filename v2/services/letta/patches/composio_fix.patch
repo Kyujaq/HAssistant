@@ -1,0 +1,37 @@
+--- a/letta/functions/composio_helpers.py
++++ b/letta/functions/composio_helpers.py
+@@ -1,11 +1,18 @@
+ import json
+ from typing import Callable, Optional
+
+-from composio.constants import DEFAULT_ENTITY_ID
+-from composio.exceptions import (
+-    ComposioClientError,
+-    NoItemsFound,
+-)
++try:
++    from composio.constants import DEFAULT_ENTITY_ID
++    from composio.exceptions import (
++        ComposioClientError,
++        NoItemsFound,
++    )
++    COMPOSIO_AVAILABLE = True
++except ImportError:
++    COMPOSIO_AVAILABLE = False
++    DEFAULT_ENTITY_ID = None
++    class ComposioClientError(Exception): pass
++    class NoItemsFound(Exception): pass
+
+ from letta.orm import Tool as ToolModel
+ from letta.schemas.tool import Tool
+@@ -14,6 +21,10 @@ from letta.schemas.tool import Tool
+ from letta.functions.async_composio_toolset import AsyncComposioToolSet
+
+
++def check_composio_available():
++    if not COMPOSIO_AVAILABLE:
++        raise ImportError("composio is not installed. Install it with: pip install composio")
++
+ # TODO: This is kind of hacky, as this is used to search up the action later on composio's side
+
+ def _generate_func_name_from_composio_action(action_name: str) -> str:
